@@ -564,7 +564,7 @@
     langEnBtn.addEventListener('click', () => setLanguage('en'));
     langZhBtn.addEventListener('click', () => setLanguage('zh-Hant'));
 
-    currentLang = detectInitialLanguage();
+    currentLang = 'en'; // detectInitialLanguage();
     statusKey = 'STATUS_READY';
     renderTexts();
     runBasicTests();
