@@ -110,6 +110,7 @@
     .dot-yellow { color: #d4aa00; }
     .dot-blue { color: #1e66ff; }
     .dot-green { color: #00aa38; }
+    .dot-purple { color: #7a3cff; }
 
     .hud {
       display: grid;
@@ -290,6 +291,7 @@
       <p class="hint"><span class="dot-label dot-yellow" id="legendYellowLabel"></span><span id="legendYellowText"></span></p>
       <p class="hint"><span class="dot-label dot-blue" id="legendBlueLabel"></span><span id="legendBlueText"></span></p>
       <p class="hint"><span class="dot-label dot-green" id="legendGreenLabel"></span><span id="legendGreenText"></span></p>
+      <p class="hint"><span class="dot-label dot-purple" id="legendPurpleLabel"></span><span id="legendPurpleText"></span></p>
     </div>
 
     <div class="hud">
@@ -353,12 +355,15 @@
     const YELLOW_RADIUS = 8;
     const BLUE_RADIUS = 8;
     const GREEN_RADIUS = 8;
+    const PURPLE_RADIUS = 9;
     const RED_SPEED = 210;
     const BLUE_SPEED = 170;
     const YELLOW_COUNT = 50;
     const GREEN_COUNT = 10;
+    const PURPLE_COUNT = 4;
     const NEW_BLUE_SAFE_MS = 3000;
     const RED_INVINCIBLE_MS = 3000;
+    const PURPLE_FREEZE_MS = 3500;
     const MAX_RED_INVINCIBLE_MS = 20000;
     const MAX_ANGLE_JITTER = Math.PI / 18;
     const DANGER_WARNING_DISTANCE = 140;
@@ -372,6 +377,7 @@
         blueSpeed: 145,
         yellowCount: 38,
         greenCount: 12,
+        purpleCount: 5,
         newBlueSafeMs: 3600,
       },
       normal: {
@@ -379,6 +385,7 @@
         blueSpeed: BLUE_SPEED,
         yellowCount: YELLOW_COUNT,
         greenCount: GREEN_COUNT,
+        purpleCount: PURPLE_COUNT,
         newBlueSafeMs: NEW_BLUE_SAFE_MS,
       },
       hard: {
@@ -386,6 +393,7 @@
         blueSpeed: 195,
         yellowCount: 62,
         greenCount: 8,
+        purpleCount: 3,
         newBlueSafeMs: 2200,
       }
     };
@@ -411,6 +419,8 @@
     let yellows = [];
     let blues = [];
     let greens = [];
+    let purples = [];
+    let freezeUntil = 0;
 
     const I18N = {
       'zh-Hant': {
@@ -424,6 +434,8 @@
         LEGEND_BLUE_TEXT: '不可碰到藍點',
         LEGEND_GREEN_LABEL: '● 綠點：',
         LEGEND_GREEN_TEXT: '碰到後紅點獲得 3 秒不受影響狀態（最多累加至 20 秒）',
+        LEGEND_PURPLE_LABEL: '● 紫點：',
+        LEGEND_PURPLE_TEXT: '碰到後讓所有藍點凍結 3.5 秒，方便脫困或轉向',
         HUD_TIME: '目前時間',
         HUD_BEST: '最佳成績',
         HUD_YELLOW: '剩餘黃點',
@@ -453,7 +465,8 @@
         TAP_HINT: '手機上可使用下方方向鍵操作',
         DANGER_SAFE: '安全',
         DANGER_WARNING: '注意',
-        DANGER_HIGH: '危險'
+        DANGER_HIGH: '危險',
+        FREEZE_REMAINING: '凍結 {SECONDS} 秒'
       },
       en: {
         TITLE: 'Red Dot Clears Yellow Dots',
@@ -466,6 +479,8 @@
         LEGEND_BLUE_TEXT: 'Do not touch blue dots',
         LEGEND_GREEN_LABEL: '● Green Dot: ',
         LEGEND_GREEN_TEXT: 'Gain 3 seconds of invulnerability (stack up to 20 seconds)',
+        LEGEND_PURPLE_LABEL: '● Purple Dot: ',
+        LEGEND_PURPLE_TEXT: 'Freeze every blue hazard for 3.5 seconds to escape tight spots',
         HUD_TIME: 'Current Time',
         HUD_BEST: 'Best Time',
         HUD_YELLOW: 'Yellow Left',
@@ -495,7 +510,8 @@
         TAP_HINT: 'On mobile, use the touch controls below',
         DANGER_SAFE: 'Safe',
         DANGER_WARNING: 'Warning',
-        DANGER_HIGH: 'Danger'
+        DANGER_HIGH: 'Danger',
+        FREEZE_REMAINING: 'Freeze {SECONDS}s'
       }
     };
 
@@ -744,6 +760,8 @@
       document.getElementById('legendBlueText').textContent = t('LEGEND_BLUE_TEXT');
       document.getElementById('legendGreenLabel').textContent = t('LEGEND_GREEN_LABEL');
       document.getElementById('legendGreenText').textContent = t('LEGEND_GREEN_TEXT');
+      document.getElementById('legendPurpleLabel').textContent = t('LEGEND_PURPLE_LABEL');
+      document.getElementById('legendPurpleText').textContent = t('LEGEND_PURPLE_TEXT');
       document.getElementById('hudTimeLabel').textContent = t('HUD_TIME');
       document.getElementById('hudBestLabel').textContent = t('HUD_BEST');
       document.getElementById('hudYellowLabel').textContent = t('HUD_YELLOW');
@@ -850,7 +868,9 @@
       };
       yellows = createDots(config.yellowCount, YELLOW_RADIUS);
       greens = createDots(config.greenCount, GREEN_RADIUS, yellows);
+      purples = createDots(config.purpleCount, PURPLE_RADIUS, [...yellows, ...greens]);
       blues = [];
+      freezeUntil = 0;
       keys = {};
       touchKeys = {};
       gameOver = false;
@@ -1002,6 +1022,17 @@
       }
     }
 
+    function updatePurpleCollisions(now) {
+      for (let i = purples.length - 1; i >= 0; i -= 1) {
+        const p = purples[i];
+        if (distance(red.x, red.y, p.x, p.y) <= red.radius + p.radius) {
+          freezeUntil = Math.max(freezeUntil, now) + PURPLE_FREEZE_MS;
+          playSound('powerup');
+          purples.splice(i, 1);
+        }
+      }
+    }
+
     function bounceBlue(blue, flipX, flipY) {
       const nextVx = flipX ? -blue.vx : blue.vx;
       const nextVy = flipY ? -blue.vy : blue.vy;
@@ -1012,10 +1043,13 @@
 
     function updateBlues(dt, now) {
       const redSafe = now < red.safeUntil;
+      const freezeActive = now < freezeUntil;
 
       for (const blue of blues) {
-        blue.x += blue.vx * dt;
-        blue.y += blue.vy * dt;
+        if (!freezeActive) {
+          blue.x += blue.vx * dt;
+          blue.y += blue.vy * dt;
+        }
 
         if (blue.x - blue.radius <= 0) {
           blue.x = blue.radius;
@@ -1063,14 +1097,37 @@
       }
     }
 
+    function drawPurples(now) {
+      const freezeActive = now < freezeUntil;
+      for (const p of purples) {
+        ctx.save();
+        const pulse = 0.75 + Math.sin(now / 140 + p.x * 0.01) * 0.15;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius + 5, 0, Math.PI * 2);
+        ctx.fillStyle = freezeActive ? 'rgba(122, 60, 255, 0.14)' : 'rgba(122, 60, 255, 0.08)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius * pulse, 0, Math.PI * 2);
+        ctx.fillStyle = '#7a3cff';
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
     function drawBlues(now) {
+      const freezeActive = now < freezeUntil;
       for (const blue of blues) {
         const safe = now < blue.safeUntil;
         ctx.globalAlpha = safe && Math.floor(now / 180) % 2 === 0 ? 0.25 : 1;
         ctx.beginPath();
         ctx.arc(blue.x, blue.y, blue.radius, 0, Math.PI * 2);
-        ctx.fillStyle = '#1e66ff';
+        ctx.fillStyle = freezeActive ? '#72b6ff' : '#1e66ff';
         ctx.fill();
+        if (freezeActive) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
         ctx.globalAlpha = 1;
       }
     }
@@ -1119,6 +1176,21 @@
       ctx.globalAlpha = 1;
     }
 
+    function drawFreezeOverlay(now) {
+      if (now >= freezeUntil || !hasStarted || paused || gameOver) return;
+      const remainingMs = freezeUntil - now;
+      const alpha = Math.min(0.14, 0.06 + (remainingMs / PURPLE_FREEZE_MS) * 0.08);
+      ctx.save();
+      ctx.fillStyle = `rgba(120, 180, 255, ${alpha.toFixed(3)})`;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      ctx.fillStyle = '#193b80';
+      ctx.font = 'bold 18px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(tf('FREEZE_REMAINING', { SECONDS: (remainingMs / 1000).toFixed(1) }), WIDTH / 2, 14);
+      ctx.restore();
+    }
+
     function drawMoveTarget() {
       if (!moveTarget || !hasStarted || paused || gameOver) return;
 
@@ -1164,8 +1236,10 @@
       ctx.clearRect(0, 0, WIDTH, HEIGHT);
       drawYellows();
       drawGreens();
+      drawPurples(now);
       drawBlues(now);
       drawMoveTarget();
+      drawFreezeOverlay(now);
       drawDangerAura(now);
       drawRed(now);
 
@@ -1196,6 +1270,7 @@
       updateYellowCollisions(timestamp);
       if (!gameOver) {
         updateGreenCollisions(timestamp);
+        updatePurpleCollisions(timestamp);
         updateBlues(dt, timestamp);
       }
       draw(timestamp);
@@ -1259,6 +1334,14 @@
       console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound off label should exist');
       soundEnabled = true;
       console.assert(DIFFICULTY_CONFIG.easy.yellowCount < DIFFICULTY_CONFIG.hard.yellowCount, 'difficulty presets should differ');
+      purples = [{ x: red.x, y: red.y, radius: PURPLE_RADIUS }];
+      freezeUntil = 0;
+      updatePurpleCollisions(1000);
+      console.assert(freezeUntil === 1000 + PURPLE_FREEZE_MS, 'purple pickup should start a freeze timer');
+      blues = [{ x: 120, y: 100, radius: BLUE_RADIUS, vx: 100, vy: 0, safeUntil: 0 }];
+      updateBlues(1, 1001);
+      console.assert(blues[0].x === 120, 'frozen blue dots should not move while freeze is active');
+      freezeUntil = 0;
       blues = [{ x: red.x + red.radius + BLUE_RADIUS + 20, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
       console.assert(getDangerState(0).key === 'DANGER_HIGH', 'getDangerState() should flag nearby active blue dots as dangerous');
       blues = [{ x: red.x + red.radius + BLUE_RADIUS + 220, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
