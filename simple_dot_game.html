@@ -114,7 +114,7 @@
 
     .hud {
       display: grid;
-      grid-template-columns: repeat(7, minmax(104px, 1fr));
+      grid-template-columns: repeat(8, minmax(96px, 1fr));
       gap: 10px;
       margin: 14px auto 4px;
       max-width: 960px;
@@ -313,6 +313,7 @@
       <div class="hud-card"><span class="hud-label" id="hudBlueLabel"></span><div class="hud-value" id="hudBlueValue">0</div></div>
       <div class="hud-card"><span class="hud-label" id="hudGreenLabel"></span><div class="hud-value" id="hudGreenValue">0</div></div>
       <div class="hud-card"><span class="hud-label" id="hudComboLabel"></span><div class="hud-value" id="hudComboValue">x1</div></div>
+      <div class="hud-card"><span class="hud-label" id="hudDashLabel"></span><div class="hud-value" id="hudDashValue">Ready</div></div>
       <div class="hud-card"><span class="hud-label" id="hudDangerLabel"></span><div class="hud-value" id="hudDangerValue">Safe</div></div>
     </div>
 
@@ -332,6 +333,9 @@
         <button class="touch-btn" type="button" data-dir="ArrowLeft">←</button>
         <button class="touch-btn" type="button" data-dir="ArrowDown">↓</button>
         <button class="touch-btn" type="button" data-dir="ArrowRight">→</button>
+      </div>
+      <div class="touch-row">
+        <button id="dashBtn" class="touch-btn" type="button">⚡</button>
       </div>
     </div>
 
@@ -360,9 +364,11 @@
     const hudBlueValueEl = document.getElementById('hudBlueValue');
     const hudGreenValueEl = document.getElementById('hudGreenValue');
     const hudComboValueEl = document.getElementById('hudComboValue');
+    const hudDashValueEl = document.getElementById('hudDashValue');
     const hudDangerValueEl = document.getElementById('hudDangerValue');
     const threatAnnouncerEl = document.getElementById('threatAnnouncer');
-    const touchButtons = Array.from(document.querySelectorAll('.touch-btn'));
+    const touchButtons = Array.from(document.querySelectorAll('.touch-btn[data-dir]'));
+    const dashBtn = document.getElementById('dashBtn');
 
     const WIDTH = canvas.width;
     const HEIGHT = canvas.height;
@@ -385,6 +391,9 @@
     const COMBO_SPEED_STEP = 0.035;
     const MAX_COMBO_SPEED_BONUS = 0.21;
     const MAX_ANGLE_JITTER = Math.PI / 18;
+    const DASH_DURATION_MS = 180;
+    const DASH_COOLDOWN_MS = 3200;
+    const DASH_SPEED_MULTIPLIER = 2.85;
     const DANGER_WARNING_DISTANCE = 140;
     const DANGER_HIGH_DISTANCE = 70;
     const BEST_TIME_STORAGE_KEY = 'red-dot-game-best-time-ms';
@@ -435,6 +444,7 @@
     let audioContext = null;
     let lastRunSummary = null;
     let lastThreatAnnouncement = '';
+    let dashQueued = false;
 
     let red;
     let yellows = [];
@@ -451,7 +461,7 @@
     const I18N = {
       'zh-Hant': {
         TITLE: '紅點清除黃點',
-        CONTROL_HINT: '方向鍵 / WASD / 觸控按鈕移動，也可點擊畫面自動前往，P 暫停，R 重新開始，空白鍵開始',
+        CONTROL_HINT: '方向鍵 / WASD / 觸控按鈕移動，也可點擊畫面自動前往，Shift / 右鍵 / ⚡ 衝刺，P 暫停，R 重新開始，空白鍵開始',
         LEGEND_RED_LABEL: '● 紅點：',
         LEGEND_RED_TEXT: '玩家控制的點；',
         LEGEND_YELLOW_LABEL: '● 黃點：',
@@ -468,6 +478,9 @@
         HUD_BLUE: '藍點數量',
         HUD_GREEN: '剩餘綠點',
         HUD_COMBO: '連擊',
+        HUD_DASH: '衝刺',
+        HUD_DASH_READY: '可用',
+        HUD_DASH_ACTIVE: '衝刺中',
         HUD_DANGER: '危險程度',
         DIFFICULTY_LABEL: '難度',
         DIFFICULTY_EASY: '簡單',
@@ -511,11 +524,12 @@
         THREAT_DOWN_RIGHT: '右下方',
         THREAT_UP_LEFT: '左上方',
         THREAT_UP_RIGHT: '右上方',
-        THREAT_ANNOUNCE: '最近威脅在{DIRECTION}，距離約 {DISTANCE}'
+        THREAT_ANNOUNCE: '最近威脅在{DIRECTION}，距離約 {DISTANCE}',
+        DASH_BUTTON: '⚡ 衝刺'
       },
       en: {
         TITLE: 'Red Dot Clears Yellow Dots',
-        CONTROL_HINT: 'Use arrow keys, WASD, or touch buttons, or click the arena to move there. P to pause, R to reset, Space to start',
+        CONTROL_HINT: 'Use arrow keys, WASD, touch buttons, or click the arena to move there. Shift / right click / ⚡ to dash. P to pause, R to reset, Space to start',
         LEGEND_RED_LABEL: '● Red Dot: ',
         LEGEND_RED_TEXT: 'Player-controlled dot;',
         LEGEND_YELLOW_LABEL: '● Yellow Dot: ',
@@ -532,6 +546,9 @@
         HUD_BLUE: 'Blue Dots',
         HUD_GREEN: 'Green Left',
         HUD_COMBO: 'Combo',
+        HUD_DASH: 'Dash',
+        HUD_DASH_READY: 'Ready',
+        HUD_DASH_ACTIVE: 'Dashing',
         HUD_DANGER: 'Danger',
         DIFFICULTY_LABEL: 'Difficulty',
         DIFFICULTY_EASY: 'Easy',
@@ -575,7 +592,8 @@
         THREAT_DOWN_RIGHT: 'down-right',
         THREAT_UP_LEFT: 'up-left',
         THREAT_UP_RIGHT: 'up-right',
-        THREAT_ANNOUNCE: 'Nearest threat {DIRECTION}, about {DISTANCE} away'
+        THREAT_ANNOUNCE: 'Nearest threat {DIRECTION}, about {DISTANCE} away',
+        DASH_BUTTON: '⚡ Dash'
       }
     };
 
@@ -859,8 +877,16 @@
       hudYellowValueEl.textContent = String(yellows.length);
       hudBlueValueEl.textContent = String(blues.length);
       hudGreenValueEl.textContent = String(greens.length);
+      const dashCooldownLeft = Math.max(0, (red?.dashCooldownUntil || 0) - now);
+      const dashActive = now < (red?.dashUntil || 0);
       hudComboValueEl.textContent = `x${Math.max(1, comboCount)}`;
       hudComboValueEl.style.color = comboActive ? '#9a3d00' : '#444';
+      hudDashValueEl.textContent = dashActive
+        ? t('HUD_DASH_ACTIVE')
+        : dashCooldownLeft > 0
+          ? `${(dashCooldownLeft / 1000).toFixed(1)}s`
+          : t('HUD_DASH_READY');
+      hudDashValueEl.style.color = dashActive ? '#7a3cff' : dashCooldownLeft > 0 ? '#9a6400' : '#0b7a0b';
       hudDangerValueEl.textContent = t(danger.key);
       hudDangerValueEl.style.color = danger.key === 'DANGER_HIGH'
         ? '#b30000'
@@ -905,11 +931,14 @@
       document.getElementById('hudBlueLabel').textContent = t('HUD_BLUE');
       document.getElementById('hudGreenLabel').textContent = t('HUD_GREEN');
       document.getElementById('hudComboLabel').textContent = t('HUD_COMBO');
+      document.getElementById('hudDashLabel').textContent = t('HUD_DASH');
       document.getElementById('hudDangerLabel').textContent = t('HUD_DANGER');
       langEnBtn.textContent = t('LANG_EN');
       langZhBtn.textContent = t('LANG_ZH');
       langEnBtn.classList.toggle('active', currentLang === 'en');
       langZhBtn.classList.toggle('active', currentLang === 'zh-Hant');
+      dashBtn.setAttribute('aria-label', t('DASH_BUTTON'));
+      dashBtn.title = t('DASH_BUTTON');
       statusEl.textContent = tf(statusKey, statusParams);
       updateButtons();
       updateHUD();
@@ -1018,7 +1047,10 @@
         y: HEIGHT / 2,
         radius: RED_RADIUS,
         safeUntil: 0,
+        dashUntil: 0,
+        dashCooldownUntil: 0,
       };
+      dashQueued = false;
       yellows = createDots(config.yellowCount, YELLOW_RADIUS);
       initialYellowCount = yellows.length;
       greens = createDots(config.greenCount, GREEN_RADIUS, yellows);
@@ -1118,12 +1150,49 @@
       maxCombo = Math.max(maxCombo, comboCount);
     }
 
+    function getDashDirection() {
+      const { dx, dy } = getInputAxis();
+      if (dx !== 0 || dy !== 0) return normalize(dx, dy);
+      if (moveTarget) return normalize(moveTarget.x - red.x, moveTarget.y - red.y);
+      const nearestYellow = getNearestYellow();
+      if (nearestYellow) return normalize(nearestYellow.x - red.x, nearestYellow.y - red.y);
+      return { x: 0, y: 0 };
+    }
+
+    function triggerDash(now = performance.now()) {
+      if (!red || paused || gameOver || !hasStarted) return false;
+      if (now < (red.dashCooldownUntil || 0)) return false;
+      const dir = getDashDirection();
+      if (dir.x === 0 && dir.y === 0) return false;
+      red.dashUntil = now + DASH_DURATION_MS;
+      red.dashCooldownUntil = now + DASH_COOLDOWN_MS;
+      red.dashVector = dir;
+      clearMoveTarget();
+      playSound('powerup');
+      updateHUD(now);
+      return true;
+    }
+
     function updateRed(dt, now = performance.now()) {
       const { dx, dy } = getInputAxis();
       const speedMultiplier = getComboSpeedMultiplier(now);
-      const redSpeed = (DIFFICULTY_CONFIG[currentDifficulty] || DIFFICULTY_CONFIG.normal).redSpeed * speedMultiplier;
+      const dashActive = now < (red.dashUntil || 0);
+      const dashDir = dashActive
+        ? (red.dashVector || getDashDirection())
+        : null;
+      const baseSpeed = (DIFFICULTY_CONFIG[currentDifficulty] || DIFFICULTY_CONFIG.normal).redSpeed * speedMultiplier;
+      const redSpeed = dashActive ? baseSpeed * DASH_SPEED_MULTIPLIER : baseSpeed;
 
-      if (dx !== 0 || dy !== 0) {
+      if (dashQueued) {
+        triggerDash(now);
+        dashQueued = false;
+      }
+
+      if (dashActive && dashDir && (dashDir.x !== 0 || dashDir.y !== 0)) {
+        red.dashVector = dashDir;
+        red.x += dashDir.x * redSpeed * dt;
+        red.y += dashDir.y * redSpeed * dt;
+      } else if (dx !== 0 || dy !== 0) {
         clearMoveTarget();
         const dir = normalize(dx, dy);
         red.x += dir.x * redSpeed * dt;
@@ -1432,6 +1501,7 @@
     function drawRed(now) {
       const remaining = red.safeUntil - now;
       const safe = remaining > 0;
+      const dashing = now < (red.dashUntil || 0);
       const blinkInterval = 150;
       const comboActive = comboCount > 1 && now < comboExpiresAt;
 
@@ -1447,6 +1517,24 @@
         ctx.closePath();
         ctx.fillStyle = '#00cc44';
         ctx.fill();
+      }
+
+      if (dashing) {
+        const dashPulse = 0.6 + (Math.sin(now / 65) + 1) * 0.16;
+        const dashVector = red.dashVector || { x: 0, y: 0 };
+        ctx.save();
+        ctx.strokeStyle = `rgba(122, 60, 255, ${(0.35 + dashPulse * 0.2).toFixed(3)})`;
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(red.x - dashVector.x * 26, red.y - dashVector.y * 26);
+        ctx.lineTo(red.x, red.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(red.x, red.y, red.radius + 11 + dashPulse * 5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(122, 60, 255, ${(0.12 + dashPulse * 0.12).toFixed(3)})`;
+        ctx.fill();
+        ctx.restore();
       }
 
       if (comboActive) {
@@ -1465,6 +1553,7 @@
       }
 
       ctx.globalAlpha = safe && Math.floor(now / blinkInterval) % 2 === 0 ? 0.3 : 1;
+      if (dashing) ctx.globalAlpha = Math.max(ctx.globalAlpha, 0.92);
       ctx.beginPath();
       ctx.arc(red.x, red.y, red.radius, 0, Math.PI * 2);
       ctx.fillStyle = 'red';
@@ -1679,8 +1768,9 @@
         moveTarget: moveTarget ? { ...moveTarget } : null,
         currentDifficulty,
         soundEnabled,
+        dashQueued,
         lastRunSummary: lastRunSummary ? { ...lastRunSummary } : null,
-        red: red ? { ...red } : null,
+        red: red ? { ...red, dashVector: red.dashVector ? { ...red.dashVector } : undefined } : null,
         yellows: yellows.map((item) => ({ ...item })),
         blues: blues.map((item) => ({ ...item })),
         greens: greens.map((item) => ({ ...item })),
@@ -1701,7 +1791,7 @@
         console.assert(['en', 'zh-Hant'].includes(detectInitialLanguage()), 'detectInitialLanguage() should return a supported language');
         console.assert(formatSeconds(1534) === '1.5s', 'formatSeconds() should show 1 decimal place');
         console.assert(createDots(5, 8).length === 5, 'createDots() should create requested number of dots under normal conditions');
-        red = { x: 100, y: 100, radius: RED_RADIUS, safeUntil: 0 };
+        red = { x: 100, y: 100, radius: RED_RADIUS, safeUntil: 0, dashUntil: 0, dashCooldownUntil: 0 };
         yellows = [
           { x: 180, y: 100, radius: YELLOW_RADIUS },
           { x: 130, y: 100, radius: YELLOW_RADIUS }
@@ -1724,6 +1814,13 @@
         console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound off label should exist');
         soundEnabled = true;
         console.assert(DIFFICULTY_CONFIG.easy.yellowCount < DIFFICULTY_CONFIG.hard.yellowCount, 'difficulty presets should differ');
+        moveTarget = { x: 200, y: 100 };
+        hasStarted = true;
+        paused = false;
+        gameOver = false;
+        console.assert(triggerDash(1000) === true, 'triggerDash() should activate when ready and there is a direction');
+        console.assert(red.dashUntil === 1000 + DASH_DURATION_MS && red.dashCooldownUntil === 1000 + DASH_COOLDOWN_MS, 'triggerDash() should set dash timers');
+        console.assert(triggerDash(1001) === false, 'triggerDash() should respect cooldown');
         comboCount = 2;
         comboExpiresAt = 1000;
         console.assert(getComboSpeedMultiplier(900) > 1, 'combo speed multiplier should increase during an active streak');
@@ -1782,8 +1879,9 @@
         moveTarget = originalState.moveTarget ? { ...originalState.moveTarget } : null;
         currentDifficulty = originalState.currentDifficulty;
         soundEnabled = originalState.soundEnabled;
+        dashQueued = originalState.dashQueued;
         lastRunSummary = originalState.lastRunSummary ? { ...originalState.lastRunSummary } : null;
-        red = originalState.red ? { ...originalState.red } : null;
+        red = originalState.red ? { ...originalState.red, dashVector: originalState.red.dashVector ? { ...originalState.red.dashVector } : undefined } : null;
         yellows = originalState.yellows.map((item) => ({ ...item }));
         blues = originalState.blues.map((item) => ({ ...item }));
         greens = originalState.greens.map((item) => ({ ...item }));
@@ -1805,7 +1903,7 @@
 
       if ([
         'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-        'w', 'a', 's', 'd', 'W', 'A', 'S', 'D', ' '
+        'w', 'a', 's', 'd', 'W', 'A', 'S', 'D', ' ', 'Shift'
       ].includes(e.key)) {
         e.preventDefault();
       }
@@ -1825,6 +1923,10 @@
       if (e.key === 'p' || e.key === 'P') {
         togglePause();
       }
+
+      if (e.key === 'Shift') {
+        dashQueued = true;
+      }
     });
 
     window.addEventListener('keyup', (e) => {
@@ -1837,8 +1939,12 @@
       clearMoveTarget();
     });
 
+    canvas.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+    });
+
     canvas.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 && event.button !== 2) return;
       event.preventDefault();
       if (gameOver) {
         resetGame();
@@ -1847,6 +1953,9 @@
       if (!hasStarted) startGame();
       const point = getCanvasPoint(event);
       setMoveTarget(point.x, point.y);
+      if (event.button === 2) {
+        triggerDash(performance.now());
+      }
       draw(performance.now());
     });
 
@@ -1869,6 +1978,13 @@
       button.addEventListener('pointercancel', endPress);
       button.addEventListener('pointerleave', endPress);
     }
+
+    dashBtn.addEventListener('click', async () => {
+      await unlockAudioContext();
+      if (!hasStarted) await startGame();
+      triggerDash(performance.now());
+      draw(performance.now());
+    });
 
     langEnBtn.addEventListener('click', () => setLanguage('en'));
     langZhBtn.addEventListener('click', () => setLanguage('zh-Hant'));
