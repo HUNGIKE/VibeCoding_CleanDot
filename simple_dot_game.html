@@ -414,6 +414,7 @@
     let currentDifficulty = 'normal';
     let soundEnabled = true;
     let audioContext = null;
+    let lastRunSummary = null;
 
     let red;
     let yellows = [];
@@ -451,6 +452,14 @@
         STATUS_START: '開始',
         STATUS_WIN: '你贏了！耗時 {TIME}，按 R 再玩一次',
         STATUS_LOSE: '你輸了！按 R 重新開始',
+        RESULT_WIN_TITLE: '過關！',
+        RESULT_LOSE_TITLE: '失敗了',
+        RESULT_NEW_BEST: '🎉 新紀錄！',
+        RESULT_TIME: '本局時間 {TIME}',
+        RESULT_BEST: '最佳成績 {TIME}',
+        RESULT_BEST_EMPTY: '尚無最佳成績',
+        RESULT_DIFFICULTY: '難度：{DIFFICULTY}',
+        RESULT_RESTART_HINT: '點擊畫面、按空白鍵，或按 R 立即再玩一局',
         STATUS_PAUSED: '已暫停，按 P 繼續',
         STATUS_WAITING: '準備好了嗎？按開始、空白鍵或 R 開始',
         LANG_EN: 'English',
@@ -496,6 +505,14 @@
         STATUS_START: 'Go!',
         STATUS_WIN: 'You win! Time: {TIME}. Press R to play again',
         STATUS_LOSE: 'You lose! Press R to restart',
+        RESULT_WIN_TITLE: 'Victory!',
+        RESULT_LOSE_TITLE: 'Game Over',
+        RESULT_NEW_BEST: '🎉 New Best!',
+        RESULT_TIME: 'Run Time {TIME}',
+        RESULT_BEST: 'Best Time {TIME}',
+        RESULT_BEST_EMPTY: 'No best time yet',
+        RESULT_DIFFICULTY: 'Difficulty: {DIFFICULTY}',
+        RESULT_RESTART_HINT: 'Click the arena, press Space, or press R to jump back in',
         STATUS_PAUSED: 'Paused. Press P to continue',
         STATUS_WAITING: 'Ready? Press Start, Space, or R to begin',
         LANG_EN: 'English',
@@ -879,6 +896,7 @@
       lastTime = 0;
       elapsedMs = 0;
       moveTarget = null;
+      lastRunSummary = null;
       setStatus('STATUS_WAITING');
       renderTexts();
       cancelLoop();
@@ -989,9 +1007,17 @@
 
       if (yellows.length === 0) {
         gameOver = true;
-        if (bestTimeMs == null || elapsedMs < bestTimeMs) {
+        const wasNewBest = bestTimeMs == null || elapsedMs < bestTimeMs;
+        if (wasNewBest) {
           saveBestTime(elapsedMs);
         }
+        lastRunSummary = {
+          result: 'win',
+          timeMs: elapsedMs,
+          bestTimeMs,
+          difficulty: currentDifficulty,
+          newBest: wasNewBest,
+        };
         playSound('win');
         setStatus('STATUS_WIN', { TIME: formatSeconds(elapsedMs) }, 'status win');
         renderTexts();
@@ -1070,6 +1096,13 @@
         const blueSafe = now < blue.safeUntil;
         if (!blueSafe && !redSafe && distance(red.x, red.y, blue.x, blue.y) <= red.radius + blue.radius) {
           gameOver = true;
+          lastRunSummary = {
+            result: 'lose',
+            timeMs: elapsedMs,
+            bestTimeMs,
+            difficulty: currentDifficulty,
+            newBest: false,
+          };
           playSound('lose');
           setStatus('STATUS_LOSE', {}, 'status lose');
           renderTexts();
@@ -1230,6 +1263,58 @@
       ctx.fillText(buttonText, WIDTH / 2, HEIGHT / 2 + 28);
     }
 
+    function drawResultOverlay() {
+      if (!lastRunSummary) return;
+
+      const cardWidth = 430;
+      const cardHeight = 214;
+      const left = WIDTH / 2 - cardWidth / 2;
+      const top = HEIGHT / 2 - cardHeight / 2;
+      const titleKey = lastRunSummary.result === 'win' ? 'RESULT_WIN_TITLE' : 'RESULT_LOSE_TITLE';
+      const difficultyLabel = t(`DIFFICULTY_${String(lastRunSummary.difficulty || 'normal').toUpperCase()}`);
+      const titleColor = lastRunSummary.result === 'win' ? '#0b7a0b' : '#b30000';
+
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+      ctx.fillRect(left, top, cardWidth, cardHeight);
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(left, top, cardWidth, cardHeight);
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      ctx.fillStyle = titleColor;
+      ctx.font = 'bold 31px Arial';
+      ctx.fillText(t(titleKey), WIDTH / 2, top + 40);
+
+      if (lastRunSummary.newBest) {
+        ctx.fillStyle = '#0d8f41';
+        ctx.font = 'bold 20px Arial';
+        ctx.fillText(t('RESULT_NEW_BEST'), WIDTH / 2, top + 72);
+      }
+
+      ctx.fillStyle = '#333';
+      ctx.font = 'bold 20px Arial';
+      ctx.fillText(tf('RESULT_TIME', { TIME: formatSeconds(lastRunSummary.timeMs || 0) }), WIDTH / 2, top + 110);
+
+      ctx.font = '16px Arial';
+      ctx.fillStyle = '#4a4a4a';
+      const bestLine = lastRunSummary.bestTimeMs == null
+        ? t('RESULT_BEST_EMPTY')
+        : tf('RESULT_BEST', { TIME: formatSeconds(lastRunSummary.bestTimeMs) });
+      ctx.fillText(bestLine, WIDTH / 2, top + 142);
+      ctx.fillText(tf('RESULT_DIFFICULTY', { DIFFICULTY: difficultyLabel }), WIDTH / 2, top + 166);
+
+      ctx.font = 'bold 16px Arial';
+      ctx.fillStyle = '#444';
+      ctx.fillText(t('RESULT_RESTART_HINT'), WIDTH / 2, top + 192);
+      ctx.restore();
+    }
+
     function draw(now) {
       updateInvincibleUI(now);
       updateHUD();
@@ -1247,6 +1332,8 @@
         drawOverlay(t('STATUS_WAITING'), t('START'));
       } else if (paused && !gameOver) {
         drawOverlay(t('STATUS_PAUSED'), t('RESUME'));
+      } else if (gameOver) {
+        drawResultOverlay();
       }
     }
 
@@ -1347,6 +1434,27 @@
       blues = [{ x: red.x + red.radius + BLUE_RADIUS + 220, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
       console.assert(getDangerState(0).key === 'DANGER_SAFE', 'getDangerState() should report safe when hazards are far away');
       blues = [];
+      bestTimeMs = 4200;
+      elapsedMs = 4200;
+      currentDifficulty = 'hard';
+      lastRunSummary = {
+        result: 'win',
+        timeMs: elapsedMs,
+        bestTimeMs,
+        difficulty: currentDifficulty,
+        newBest: true,
+      };
+      console.assert(lastRunSummary.newBest === true && lastRunSummary.bestTimeMs === 4200, 'result summary should preserve win details');
+      gameOver = true;
+      let resetCalls = 0;
+      const originalResetGame = resetGame;
+      resetGame = () => { resetCalls += 1; };
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 10, clientY: 10 }));
+      console.assert(resetCalls === 1, 'clicking the arena after game over should restart');
+      resetGame = originalResetGame;
+      gameOver = false;
+      lastRunSummary = null;
+      blues = [];
     }
 
     window.addEventListener('keydown', (e) => {
@@ -1359,8 +1467,12 @@
         e.preventDefault();
       }
 
-      if (e.key === ' ' && !hasStarted) {
-        startGame();
+      if (e.key === ' ' && (!hasStarted || gameOver)) {
+        if (gameOver) {
+          resetGame();
+        } else {
+          startGame();
+        }
       }
 
       if (e.key === 'r' || e.key === 'R') {
@@ -1385,6 +1497,10 @@
     canvas.addEventListener('pointerdown', (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
+      if (gameOver) {
+        resetGame();
+        return;
+      }
       if (!hasStarted) startGame();
       const point = getCanvasPoint(event);
       setMoveTarget(point.x, point.y);
