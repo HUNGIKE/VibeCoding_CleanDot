@@ -422,6 +422,7 @@
     let greens = [];
     let purples = [];
     let freezeUntil = 0;
+    let initialYellowCount = 0;
 
     const I18N = {
       'zh-Hant': {
@@ -815,6 +816,21 @@
       return Math.hypot(ax - bx, ay - by);
     }
 
+    function getNearestYellow() {
+      let nearest = null;
+      let nearestDistance = Infinity;
+
+      for (const yellow of yellows) {
+        const currentDistance = distance(red.x, red.y, yellow.x, yellow.y);
+        if (currentDistance < nearestDistance) {
+          nearestDistance = currentDistance;
+          nearest = yellow;
+        }
+      }
+
+      return nearest;
+    }
+
     function clamp(value, min, max) {
       return Math.max(min, Math.min(max, value));
     }
@@ -884,6 +900,7 @@
         safeUntil: 0,
       };
       yellows = createDots(config.yellowCount, YELLOW_RADIUS);
+      initialYellowCount = yellows.length;
       greens = createDots(config.greenCount, GREEN_RADIUS, yellows);
       purples = createDots(config.purpleCount, PURPLE_RADIUS, [...yellows, ...greens]);
       blues = [];
@@ -1165,6 +1182,43 @@
       }
     }
 
+    function drawNearestYellowGuide(now) {
+      if (!hasStarted || paused || gameOver || yellows.length === 0) return;
+
+      const target = getNearestYellow();
+      if (!target) return;
+
+      const pulse = 0.6 + (Math.sin(now / 170) + 1) * 0.2;
+      const progress = initialYellowCount > 0
+        ? 1 - yellows.length / initialYellowCount
+        : 0;
+      const lineAlpha = 0.14 + progress * 0.18;
+
+      ctx.save();
+      ctx.setLineDash([6, 7]);
+      ctx.lineDashOffset = -(now / 42);
+      ctx.strokeStyle = `rgba(212, 170, 0, ${lineAlpha.toFixed(3)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(red.x, red.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, target.radius + 8 + pulse * 7, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(212, 170, 0, ${(0.32 + pulse * 0.2).toFixed(3)})`;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, target.radius + 15 + pulse * 5, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(212, 170, 0, ${(0.12 + pulse * 0.12).toFixed(3)})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
+
     function drawDangerAura(now) {
       if (!hasStarted || paused || gameOver) return;
       const danger = getDangerState(now);
@@ -1323,6 +1377,7 @@
       drawGreens();
       drawPurples(now);
       drawBlues(now);
+      drawNearestYellowGuide(now);
       drawMoveTarget();
       drawFreezeOverlay(now);
       drawDangerAura(now);
@@ -1404,6 +1459,12 @@
       console.assert(['en', 'zh-Hant'].includes(detectInitialLanguage()), 'detectInitialLanguage() should return a supported language');
       console.assert(formatSeconds(1534) === '1.5s', 'formatSeconds() should show 1 decimal place');
       console.assert(createDots(5, 8).length === 5, 'createDots() should create requested number of dots under normal conditions');
+      red = { x: 100, y: 100, radius: RED_RADIUS, safeUntil: 0 };
+      yellows = [
+        { x: 180, y: 100, radius: YELLOW_RADIUS },
+        { x: 130, y: 100, radius: YELLOW_RADIUS }
+      ];
+      console.assert(getNearestYellow().x === 130, 'getNearestYellow() should return the closest yellow target');
       touchKeys = { ArrowLeft: true };
       console.assert(getInputAxis().dx === -1 && getInputAxis().dy === 0, 'touch controls should feed movement input');
       releaseAllTouchKeys();
