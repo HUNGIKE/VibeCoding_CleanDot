@@ -43,7 +43,8 @@
 
     .toolbar-actions,
     .lang-switch,
-    .difficulty-switch {
+    .difficulty-switch,
+    .audio-switch {
       display: flex;
       gap: 8px;
       font-size: 13px;
@@ -272,6 +273,9 @@
         <button id="difficulty-normal" class="action-btn active" type="button">Normal</button>
         <button id="difficulty-hard" class="action-btn" type="button">Hard</button>
       </div>
+      <div class="audio-switch">
+        <button id="audioToggleBtn" class="action-btn" type="button">Sound: On</button>
+      </div>
       <div class="lang-switch">
         <button id="lang-en" class="lang-btn" type="button">English</button>
         <button id="lang-zh" class="lang-btn" type="button">Traditional Chinese</button>
@@ -330,6 +334,7 @@
     const difficultyHardBtn = document.getElementById('difficulty-hard');
     const pauseBtn = document.getElementById('pauseBtn');
     const restartBtn = document.getElementById('restartBtn');
+    const audioToggleBtn = document.getElementById('audioToggleBtn');
     const invincibleTextEl = document.getElementById('invincibleText');
     const invincibleBarEl = document.getElementById('invincibleBar');
     const invincibleFillEl = document.getElementById('invincibleFill');
@@ -360,6 +365,7 @@
     const DANGER_HIGH_DISTANCE = 70;
     const BEST_TIME_STORAGE_KEY = 'red-dot-game-best-time-ms';
     const DIFFICULTY_STORAGE_KEY = 'red-dot-game-difficulty';
+    const SOUND_STORAGE_KEY = 'red-dot-game-sound-enabled';
     const DIFFICULTY_CONFIG = {
       easy: {
         redSpeed: 225,
@@ -398,6 +404,8 @@
     let bestTimeMs = null;
     let moveTarget = null;
     let currentDifficulty = 'normal';
+    let soundEnabled = true;
+    let audioContext = null;
 
     let red;
     let yellows = [];
@@ -437,6 +445,8 @@
         LANG_ZH: 'Traditional Chinese',
         INVINCIBLE_REMAINING: '無敵 {SECONDS} 秒',
         PAUSE: '暫停',
+        SOUND_ON: '音效：開',
+        SOUND_OFF: '音效：關',
         RESUME: '繼續',
         RESTART: '重新開始',
         START: '開始遊戲',
@@ -477,6 +487,8 @@
         LANG_ZH: 'Traditional Chinese',
         INVINCIBLE_REMAINING: 'Shield {SECONDS}s',
         PAUSE: 'Pause',
+        SOUND_ON: 'Sound: On',
+        SOUND_OFF: 'Sound: Off',
         RESUME: 'Resume',
         RESTART: 'Restart',
         START: 'Start Game',
@@ -557,6 +569,103 @@
       }
     }
 
+    function loadSoundPreference() {
+      try {
+        const stored = localStorage.getItem(SOUND_STORAGE_KEY);
+        soundEnabled = stored == null ? true : stored !== 'false';
+      } catch {
+        soundEnabled = true;
+      }
+    }
+
+    function saveSoundPreference() {
+      try {
+        localStorage.setItem(SOUND_STORAGE_KEY, String(soundEnabled));
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+    function ensureAudioContext() {
+      if (audioContext) return audioContext;
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return null;
+      audioContext = new AudioContextCtor();
+      return audioContext;
+    }
+
+    async function unlockAudioContext() {
+      const ctx = ensureAudioContext();
+      if (!ctx) return null;
+      if (ctx.state === 'suspended') {
+        try {
+          await ctx.resume();
+        } catch {
+          return ctx;
+        }
+      }
+      return ctx;
+    }
+
+    function playSound(kind) {
+      if (!soundEnabled) return;
+      const ctx = ensureAudioContext();
+      if (!ctx || ctx.state !== 'running') return;
+
+      const now = ctx.currentTime;
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (kind === 'collect') {
+        oscillator.type = 'triangle';
+        oscillator.frequency.setValueAtTime(620, now);
+        oscillator.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.05, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+        oscillator.start(now);
+        oscillator.stop(now + 0.14);
+        return;
+      }
+
+      if (kind === 'powerup') {
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(420, now);
+        oscillator.frequency.exponentialRampToValueAtTime(700, now + 0.09);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.07, now + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+        oscillator.start(now);
+        oscillator.stop(now + 0.22);
+        return;
+      }
+
+      if (kind === 'lose') {
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.setValueAtTime(280, now);
+        oscillator.frequency.exponentialRampToValueAtTime(120, now + 0.24);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.06, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+        oscillator.start(now);
+        oscillator.stop(now + 0.28);
+        return;
+      }
+
+      if (kind === 'win') {
+        oscillator.type = 'square';
+        oscillator.frequency.setValueAtTime(660, now);
+        oscillator.frequency.exponentialRampToValueAtTime(990, now + 0.1);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.06, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+        oscillator.start(now);
+        oscillator.stop(now + 0.3);
+      }
+    }
+
     function setStatus(key, params = {}, className = 'status') {
       statusKey = key;
       statusParams = params;
@@ -611,6 +720,8 @@
       pauseBtn.textContent = paused ? t('RESUME') : t('PAUSE');
       pauseBtn.classList.toggle('active', paused);
       restartBtn.textContent = hasStarted ? t('RESTART') : t('START');
+      audioToggleBtn.textContent = soundEnabled ? t('SOUND_ON') : t('SOUND_OFF');
+      audioToggleBtn.classList.toggle('active', soundEnabled);
       difficultyEasyBtn.textContent = t('DIFFICULTY_EASY');
       difficultyNormalBtn.textContent = t('DIFFICULTY_NORMAL');
       difficultyHardBtn.textContent = t('DIFFICULTY_HARD');
@@ -754,8 +865,9 @@
       draw(performance.now());
     }
 
-    function startGame() {
+    async function startGame() {
       if (hasStarted && !gameOver && !paused) return;
+      await unlockAudioContext();
       gameOver = false;
       paused = false;
       hasStarted = true;
@@ -851,6 +963,7 @@
         safeUntil: now + config.newBlueSafeMs,
       });
 
+      playSound('collect');
       yellows.splice(index, 1);
       updateHUD();
 
@@ -859,6 +972,7 @@
         if (bestTimeMs == null || elapsedMs < bestTimeMs) {
           saveBestTime(elapsedMs);
         }
+        playSound('win');
         setStatus('STATUS_WIN', { TIME: formatSeconds(elapsedMs) }, 'status win');
         renderTexts();
         cancelLoop();
@@ -880,6 +994,7 @@
         const g = greens[i];
         if (distance(red.x, red.y, g.x, g.y) <= red.radius + g.radius) {
           red.safeUntil = Math.min(now + MAX_RED_INVINCIBLE_MS, Math.max(red.safeUntil, now) + RED_INVINCIBLE_MS);
+          playSound('powerup');
           greens.splice(i, 1);
           updateHUD();
           updateInvincibleUI(now);
@@ -921,6 +1036,7 @@
         const blueSafe = now < blue.safeUntil;
         if (!blueSafe && !redSafe && distance(red.x, red.y, blue.x, blue.y) <= red.radius + blue.radius) {
           gameOver = true;
+          playSound('lose');
           setStatus('STATUS_LOSE', {}, 'status lose');
           renderTexts();
           cancelLoop();
@@ -1137,6 +1253,11 @@
       console.assert(red.x > 100 && red.y === 100, 'updateRed() should move toward click target when no manual input is held');
       clearMoveTarget();
       console.assert(getBestTimeStorageKey().endsWith(currentDifficulty), 'best time storage key should include the current difficulty');
+      soundEnabled = true;
+      console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound toggle labels should exist');
+      soundEnabled = false;
+      console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound off label should exist');
+      soundEnabled = true;
       console.assert(DIFFICULTY_CONFIG.easy.yellowCount < DIFFICULTY_CONFIG.hard.yellowCount, 'difficulty presets should differ');
       blues = [{ x: red.x + red.radius + BLUE_RADIUS + 20, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
       console.assert(getDangerState(0).key === 'DANGER_HIGH', 'getDangerState() should flag nearby active blue dots as dangerous');
@@ -1212,6 +1333,15 @@
     difficultyEasyBtn.addEventListener('click', () => setDifficulty('easy'));
     difficultyNormalBtn.addEventListener('click', () => setDifficulty('normal'));
     difficultyHardBtn.addEventListener('click', () => setDifficulty('hard'));
+    audioToggleBtn.addEventListener('click', async () => {
+      soundEnabled = !soundEnabled;
+      saveSoundPreference();
+      if (soundEnabled) {
+        await unlockAudioContext();
+        playSound('powerup');
+      }
+      renderTexts();
+    });
     pauseBtn.addEventListener('click', () => {
       if (!hasStarted) {
         startGame();
@@ -1223,6 +1353,7 @@
 
     loadDifficulty();
     loadBestTime();
+    loadSoundPreference();
     currentLang = detectInitialLanguage();
     prepareRound();
     runBasicTests();
