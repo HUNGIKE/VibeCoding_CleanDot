@@ -114,10 +114,10 @@
 
     .hud {
       display: grid;
-      grid-template-columns: repeat(6, minmax(110px, 1fr));
+      grid-template-columns: repeat(7, minmax(104px, 1fr));
       gap: 10px;
       margin: 14px auto 4px;
-      max-width: 900px;
+      max-width: 960px;
     }
 
     .hud-card {
@@ -312,6 +312,7 @@
       <div class="hud-card"><span class="hud-label" id="hudYellowLabel"></span><div class="hud-value" id="hudYellowValue">0</div></div>
       <div class="hud-card"><span class="hud-label" id="hudBlueLabel"></span><div class="hud-value" id="hudBlueValue">0</div></div>
       <div class="hud-card"><span class="hud-label" id="hudGreenLabel"></span><div class="hud-value" id="hudGreenValue">0</div></div>
+      <div class="hud-card"><span class="hud-label" id="hudComboLabel"></span><div class="hud-value" id="hudComboValue">x1</div></div>
       <div class="hud-card"><span class="hud-label" id="hudDangerLabel"></span><div class="hud-value" id="hudDangerValue">Safe</div></div>
     </div>
 
@@ -358,6 +359,7 @@
     const hudYellowValueEl = document.getElementById('hudYellowValue');
     const hudBlueValueEl = document.getElementById('hudBlueValue');
     const hudGreenValueEl = document.getElementById('hudGreenValue');
+    const hudComboValueEl = document.getElementById('hudComboValue');
     const hudDangerValueEl = document.getElementById('hudDangerValue');
     const threatAnnouncerEl = document.getElementById('threatAnnouncer');
     const touchButtons = Array.from(document.querySelectorAll('.touch-btn'));
@@ -379,6 +381,9 @@
     const RED_INVINCIBLE_MS = 3000;
     const PURPLE_FREEZE_MS = 3500;
     const MAX_RED_INVINCIBLE_MS = 20000;
+    const COMBO_WINDOW_MS = 1500;
+    const COMBO_SPEED_STEP = 0.035;
+    const MAX_COMBO_SPEED_BONUS = 0.21;
     const MAX_ANGLE_JITTER = Math.PI / 18;
     const DANGER_WARNING_DISTANCE = 140;
     const DANGER_HIGH_DISTANCE = 70;
@@ -438,6 +443,10 @@
     let purples = [];
     let freezeUntil = 0;
     let initialYellowCount = 0;
+    let comboCount = 0;
+    let maxCombo = 0;
+    let comboExpiresAt = 0;
+    let lastYellowPickupAt = 0;
 
     const I18N = {
       'zh-Hant': {
@@ -458,6 +467,7 @@
         HUD_YELLOW: '剩餘黃點',
         HUD_BLUE: '藍點數量',
         HUD_GREEN: '剩餘綠點',
+        HUD_COMBO: '連擊',
         HUD_DANGER: '危險程度',
         DIFFICULTY_LABEL: '難度',
         DIFFICULTY_EASY: '簡單',
@@ -475,6 +485,7 @@
         RESULT_BEST: '最佳成績 {TIME}',
         RESULT_BEST_EMPTY: '尚無最佳成績',
         RESULT_DIFFICULTY: '難度：{DIFFICULTY}',
+        RESULT_COMBO: '最高連擊 x{COMBO}',
         RESULT_RESTART_HINT: '點擊畫面、按空白鍵，或按 R 立即再玩一局',
         STATUS_PAUSED: '已暫停，按 P 繼續',
         STATUS_WAITING: '準備好了嗎？按開始、空白鍵或 R 開始',
@@ -520,6 +531,7 @@
         HUD_YELLOW: 'Yellow Left',
         HUD_BLUE: 'Blue Dots',
         HUD_GREEN: 'Green Left',
+        HUD_COMBO: 'Combo',
         HUD_DANGER: 'Danger',
         DIFFICULTY_LABEL: 'Difficulty',
         DIFFICULTY_EASY: 'Easy',
@@ -537,6 +549,7 @@
         RESULT_BEST: 'Best Time {TIME}',
         RESULT_BEST_EMPTY: 'No best time yet',
         RESULT_DIFFICULTY: 'Difficulty: {DIFFICULTY}',
+        RESULT_COMBO: 'Max combo x{COMBO}',
         RESULT_RESTART_HINT: 'Click the arena, press Space, or press R to jump back in',
         STATUS_PAUSED: 'Paused. Press P to continue',
         STATUS_WAITING: 'Ready? Press Start, Space, or R to begin',
@@ -840,11 +853,14 @@
 
     function updateHUD(now = performance.now()) {
       const danger = getDangerState(now);
+      const comboActive = comboCount > 1 && now < comboExpiresAt;
       hudTimeValueEl.textContent = formatSeconds(elapsedMs);
       hudBestValueEl.textContent = bestTimeMs == null ? t('HUD_BEST_EMPTY') : formatSeconds(bestTimeMs);
       hudYellowValueEl.textContent = String(yellows.length);
       hudBlueValueEl.textContent = String(blues.length);
       hudGreenValueEl.textContent = String(greens.length);
+      hudComboValueEl.textContent = `x${Math.max(1, comboCount)}`;
+      hudComboValueEl.style.color = comboActive ? '#9a3d00' : '#444';
       hudDangerValueEl.textContent = t(danger.key);
       hudDangerValueEl.style.color = danger.key === 'DANGER_HIGH'
         ? '#b30000'
@@ -888,6 +904,7 @@
       document.getElementById('hudYellowLabel').textContent = t('HUD_YELLOW');
       document.getElementById('hudBlueLabel').textContent = t('HUD_BLUE');
       document.getElementById('hudGreenLabel').textContent = t('HUD_GREEN');
+      document.getElementById('hudComboLabel').textContent = t('HUD_COMBO');
       document.getElementById('hudDangerLabel').textContent = t('HUD_DANGER');
       langEnBtn.textContent = t('LANG_EN');
       langZhBtn.textContent = t('LANG_ZH');
@@ -1017,6 +1034,10 @@
       elapsedMs = 0;
       moveTarget = null;
       lastRunSummary = null;
+      comboCount = 0;
+      maxCombo = 0;
+      comboExpiresAt = 0;
+      lastYellowPickupAt = 0;
       setStatus('STATUS_WAITING');
       renderTexts();
       cancelLoop();
@@ -1076,13 +1097,35 @@
       };
     }
 
-    function updateRed(dt) {
+    function getComboSpeedMultiplier(now = performance.now()) {
+      if (comboCount <= 1 || now >= comboExpiresAt) return 1;
+      return 1 + Math.min(MAX_COMBO_SPEED_BONUS, (comboCount - 1) * COMBO_SPEED_STEP);
+    }
+
+    function updateCombo(now) {
+      if (comboCount > 0 && now >= comboExpiresAt) {
+        comboCount = 0;
+        comboExpiresAt = 0;
+      }
+    }
+
+    function registerYellowPickup(now) {
+      comboCount = lastYellowPickupAt > 0 && now - lastYellowPickupAt <= COMBO_WINDOW_MS
+        ? comboCount + 1
+        : 1;
+      comboExpiresAt = now + COMBO_WINDOW_MS;
+      lastYellowPickupAt = now;
+      maxCombo = Math.max(maxCombo, comboCount);
+    }
+
+    function updateRed(dt, now = performance.now()) {
       const { dx, dy } = getInputAxis();
+      const speedMultiplier = getComboSpeedMultiplier(now);
+      const redSpeed = (DIFFICULTY_CONFIG[currentDifficulty] || DIFFICULTY_CONFIG.normal).redSpeed * speedMultiplier;
 
       if (dx !== 0 || dy !== 0) {
         clearMoveTarget();
         const dir = normalize(dx, dy);
-        const redSpeed = (DIFFICULTY_CONFIG[currentDifficulty] || DIFFICULTY_CONFIG.normal).redSpeed;
         red.x += dir.x * redSpeed * dt;
         red.y += dir.y * redSpeed * dt;
       } else if (moveTarget) {
@@ -1090,7 +1133,6 @@
         const toTargetY = moveTarget.y - red.y;
         const distanceToTarget = Math.hypot(toTargetX, toTargetY);
 
-        const redSpeed = (DIFFICULTY_CONFIG[currentDifficulty] || DIFFICULTY_CONFIG.normal).redSpeed;
         if (distanceToTarget <= redSpeed * dt) {
           red.x = moveTarget.x;
           red.y = moveTarget.y;
@@ -1122,8 +1164,9 @@
       });
 
       playSound('collect');
+      registerYellowPickup(now);
       yellows.splice(index, 1);
-      updateHUD();
+      updateHUD(now);
 
       if (yellows.length === 0) {
         gameOver = true;
@@ -1137,6 +1180,7 @@
           bestTimeMs,
           difficulty: currentDifficulty,
           newBest: wasNewBest,
+          maxCombo,
         };
         playSound('win');
         setStatus('STATUS_WIN', { TIME: formatSeconds(elapsedMs) }, 'status win');
@@ -1222,6 +1266,7 @@
             bestTimeMs,
             difficulty: currentDifficulty,
             newBest: false,
+            maxCombo,
           };
           playSound('lose');
           setStatus('STATUS_LOSE', {}, 'status lose');
@@ -1388,6 +1433,7 @@
       const remaining = red.safeUntil - now;
       const safe = remaining > 0;
       const blinkInterval = 150;
+      const comboActive = comboCount > 1 && now < comboExpiresAt;
 
       if (safe) {
         const ratio = Math.max(0, Math.min(1, remaining / MAX_RED_INVINCIBLE_MS));
@@ -1401,6 +1447,21 @@
         ctx.closePath();
         ctx.fillStyle = '#00cc44';
         ctx.fill();
+      }
+
+      if (comboActive) {
+        const comboPulse = 0.7 + (Math.sin(now / 95) + 1) * 0.18;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(red.x, red.y, red.radius + 8 + comboCount * 0.8, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 153, 0, ${(0.11 + comboPulse * 0.12).toFixed(3)})`;
+        ctx.fill();
+        ctx.fillStyle = '#9a3d00';
+        ctx.font = 'bold 14px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(`x${comboCount}`, red.x, red.y - red.radius - 10);
+        ctx.restore();
       }
 
       ctx.globalAlpha = safe && Math.floor(now / blinkInterval) % 2 === 0 ? 0.3 : 1;
@@ -1469,7 +1530,7 @@
       if (!lastRunSummary) return;
 
       const cardWidth = 430;
-      const cardHeight = 214;
+      const cardHeight = 228;
       const left = WIDTH / 2 - cardWidth / 2;
       const top = HEIGHT / 2 - cardHeight / 2;
       const titleKey = lastRunSummary.result === 'win' ? 'RESULT_WIN_TITLE' : 'RESULT_LOSE_TITLE';
@@ -1508,12 +1569,13 @@
       const bestLine = lastRunSummary.bestTimeMs == null
         ? t('RESULT_BEST_EMPTY')
         : tf('RESULT_BEST', { TIME: formatSeconds(lastRunSummary.bestTimeMs) });
-      ctx.fillText(bestLine, WIDTH / 2, top + 142);
-      ctx.fillText(tf('RESULT_DIFFICULTY', { DIFFICULTY: difficultyLabel }), WIDTH / 2, top + 166);
+      ctx.fillText(bestLine, WIDTH / 2, top + 140);
+      ctx.fillText(tf('RESULT_DIFFICULTY', { DIFFICULTY: difficultyLabel }), WIDTH / 2, top + 162);
+      ctx.fillText(tf('RESULT_COMBO', { COMBO: Math.max(1, lastRunSummary.maxCombo || 0) }), WIDTH / 2, top + 184);
 
-      ctx.font = 'bold 16px Arial';
+      ctx.font = 'bold 15px Arial';
       ctx.fillStyle = '#444';
-      ctx.fillText(t('RESULT_RESTART_HINT'), WIDTH / 2, top + 192);
+      ctx.fillText(t('RESULT_RESTART_HINT'), WIDTH / 2, top + 204);
       ctx.restore();
     }
 
@@ -1558,7 +1620,8 @@
       lastTime = timestamp;
       elapsedMs += dt * 1000;
 
-      updateRed(dt);
+      updateCombo(timestamp);
+      updateRed(dt, timestamp);
       updateYellowCollisions(timestamp);
       if (!gameOver) {
         updateGreenCollisions(timestamp);
@@ -1624,6 +1687,10 @@
         purples: purples.map((item) => ({ ...item })),
         freezeUntil,
         initialYellowCount,
+        comboCount,
+        maxCombo,
+        comboExpiresAt,
+        lastYellowPickupAt,
       };
 
       try {
@@ -1657,6 +1724,14 @@
         console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound off label should exist');
         soundEnabled = true;
         console.assert(DIFFICULTY_CONFIG.easy.yellowCount < DIFFICULTY_CONFIG.hard.yellowCount, 'difficulty presets should differ');
+        comboCount = 2;
+        comboExpiresAt = 1000;
+        console.assert(getComboSpeedMultiplier(900) > 1, 'combo speed multiplier should increase during an active streak');
+        updateCombo(1001);
+        console.assert(comboCount === 0, 'combo should expire after the combo window ends');
+        registerYellowPickup(1200);
+        registerYellowPickup(2400);
+        console.assert(comboCount === 2 && maxCombo >= 2, 'registerYellowPickup() should build a combo inside the combo window');
         purples = [{ x: red.x, y: red.y, radius: PURPLE_RADIUS }];
         freezeUntil = 0;
         updatePurpleCollisions(1000);
@@ -1683,6 +1758,7 @@
           bestTimeMs,
           difficulty: currentDifficulty,
           newBest: true,
+          maxCombo: 4,
         };
         console.assert(lastRunSummary.newBest === true && lastRunSummary.bestTimeMs === 4200, 'result summary should preserve win details');
         gameOver = true;
@@ -1714,6 +1790,10 @@
         purples = originalState.purples.map((item) => ({ ...item }));
         freezeUntil = originalState.freezeUntil;
         initialYellowCount = originalState.initialYellowCount;
+        comboCount = originalState.comboCount;
+        maxCombo = originalState.maxCombo;
+        comboExpiresAt = originalState.comboExpiresAt;
+        lastYellowPickupAt = originalState.lastYellowPickupAt;
         updateButtons();
         updateHUD();
         updateInvincibleUI();
