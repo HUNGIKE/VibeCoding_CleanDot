@@ -280,6 +280,7 @@
       <div class="toolbar-actions">
         <button id="pauseBtn" class="action-btn" type="button"></button>
         <button id="restartBtn" class="action-btn" type="button"></button>
+        <button id="fullscreenBtn" class="action-btn" type="button"></button>
       </div>
       <div class="difficulty-switch">
         <button id="difficulty-easy" class="action-btn" type="button">Easy</button>
@@ -354,6 +355,7 @@
     const difficultyHardBtn = document.getElementById('difficulty-hard');
     const pauseBtn = document.getElementById('pauseBtn');
     const restartBtn = document.getElementById('restartBtn');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
     const audioToggleBtn = document.getElementById('audioToggleBtn');
     const invincibleTextEl = document.getElementById('invincibleText');
     const invincibleBarEl = document.getElementById('invincibleBar');
@@ -399,6 +401,7 @@
     const BEST_TIME_STORAGE_KEY = 'red-dot-game-best-time-ms';
     const DIFFICULTY_STORAGE_KEY = 'red-dot-game-difficulty';
     const SOUND_STORAGE_KEY = 'red-dot-game-sound-enabled';
+    const FULLSCREEN_TARGET = document.documentElement;
     const DIFFICULTY_CONFIG = {
       easy: {
         redSpeed: 225,
@@ -461,7 +464,7 @@
     const I18N = {
       'zh-Hant': {
         TITLE: '紅點清除黃點',
-        CONTROL_HINT: '方向鍵 / WASD / 觸控按鈕移動，也可點擊畫面自動前往，Shift / 右鍵 / ⚡ 衝刺，P 暫停，R 重新開始，空白鍵開始',
+        CONTROL_HINT: '方向鍵 / WASD / 觸控按鈕移動，也可點擊畫面自動前往，Shift / 右鍵 / ⚡ 衝刺，P 暫停，R 重新開始，F 全螢幕切換，空白鍵開始',
         LEGEND_RED_LABEL: '● 紅點：',
         LEGEND_RED_TEXT: '玩家控制的點；',
         LEGEND_YELLOW_LABEL: '● 黃點：',
@@ -511,6 +514,8 @@
         RESUME: '繼續',
         RESTART: '重新開始',
         START: '開始遊戲',
+        FULLSCREEN_ENTER: '全螢幕',
+        FULLSCREEN_EXIT: '離開全螢幕',
         TAP_HINT: '手機上可使用下方方向鍵操作',
         DANGER_SAFE: '安全',
         DANGER_WARNING: '注意',
@@ -525,11 +530,12 @@
         THREAT_UP_LEFT: '左上方',
         THREAT_UP_RIGHT: '右上方',
         THREAT_ANNOUNCE: '最近威脅在{DIRECTION}，距離約 {DISTANCE}',
-        DASH_BUTTON: '⚡ 衝刺'
+        DASH_BUTTON: '⚡ 衝刺',
+        FULLSCREEN_UNAVAILABLE: '這個瀏覽器不支援全螢幕模式'
       },
       en: {
         TITLE: 'Red Dot Clears Yellow Dots',
-        CONTROL_HINT: 'Use arrow keys, WASD, touch buttons, or click the arena to move there. Shift / right click / ⚡ to dash. P to pause, R to reset, Space to start',
+        CONTROL_HINT: 'Use arrow keys, WASD, touch buttons, or click the arena to move there. Shift / right click / ⚡ to dash. P to pause, R to reset, F to toggle fullscreen, Space to start',
         LEGEND_RED_LABEL: '● Red Dot: ',
         LEGEND_RED_TEXT: 'Player-controlled dot;',
         LEGEND_YELLOW_LABEL: '● Yellow Dot: ',
@@ -579,6 +585,8 @@
         RESUME: 'Resume',
         RESTART: 'Restart',
         START: 'Start Game',
+        FULLSCREEN_ENTER: 'Fullscreen',
+        FULLSCREEN_EXIT: 'Exit Fullscreen',
         TAP_HINT: 'On mobile, use the touch controls below',
         DANGER_SAFE: 'Safe',
         DANGER_WARNING: 'Warning',
@@ -593,7 +601,8 @@
         THREAT_UP_LEFT: 'up-left',
         THREAT_UP_RIGHT: 'up-right',
         THREAT_ANNOUNCE: 'Nearest threat {DIRECTION}, about {DISTANCE} away',
-        DASH_BUTTON: '⚡ Dash'
+        DASH_BUTTON: '⚡ Dash',
+        FULLSCREEN_UNAVAILABLE: 'Fullscreen is not supported in this browser'
       }
     };
 
@@ -896,9 +905,13 @@
     }
 
     function updateButtons() {
+      const fullscreenSupported = isFullscreenSupported();
       pauseBtn.textContent = paused ? t('RESUME') : t('PAUSE');
       pauseBtn.classList.toggle('active', paused);
       restartBtn.textContent = hasStarted ? t('RESTART') : t('START');
+      fullscreenBtn.hidden = !fullscreenSupported;
+      fullscreenBtn.textContent = isFullscreenActive() ? t('FULLSCREEN_EXIT') : t('FULLSCREEN_ENTER');
+      fullscreenBtn.classList.toggle('active', isFullscreenActive());
       audioToggleBtn.textContent = soundEnabled ? t('SOUND_ON') : t('SOUND_OFF');
       audioToggleBtn.classList.toggle('active', soundEnabled);
       difficultyEasyBtn.textContent = t('DIFFICULTY_EASY');
@@ -943,6 +956,34 @@
       updateButtons();
       updateHUD();
       updateInvincibleUI();
+    }
+
+    function isFullscreenSupported() {
+      return typeof document.fullscreenEnabled === 'boolean' ? document.fullscreenEnabled : !!FULLSCREEN_TARGET.requestFullscreen;
+    }
+
+    function isFullscreenActive() {
+      return document.fullscreenElement === FULLSCREEN_TARGET;
+    }
+
+    async function toggleFullscreen() {
+      if (!isFullscreenSupported()) {
+        setStatus('FULLSCREEN_UNAVAILABLE');
+        return false;
+      }
+
+      try {
+        if (isFullscreenActive()) {
+          await document.exitFullscreen();
+        } else {
+          await FULLSCREEN_TARGET.requestFullscreen();
+        }
+        updateButtons();
+        return true;
+      } catch {
+        updateButtons();
+        return false;
+      }
     }
 
     function setLanguage(lang) {
@@ -1814,6 +1855,8 @@
         console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound off label should exist');
         soundEnabled = true;
         console.assert(DIFFICULTY_CONFIG.easy.yellowCount < DIFFICULTY_CONFIG.hard.yellowCount, 'difficulty presets should differ');
+        console.assert(typeof isFullscreenSupported() === 'boolean', 'isFullscreenSupported() should return a boolean');
+        console.assert([t('FULLSCREEN_ENTER'), t('FULLSCREEN_EXIT')].every((label) => label.length > 0), 'fullscreen button labels should exist');
         moveTarget = { x: 200, y: 100 };
         hasStarted = true;
         paused = false;
@@ -1924,6 +1967,10 @@
         togglePause();
       }
 
+      if (e.key === 'f' || e.key === 'F') {
+        toggleFullscreen();
+      }
+
       if (e.key === 'Shift') {
         dashQueued = true;
       }
@@ -2007,7 +2054,15 @@
       }
       togglePause();
     });
+    fullscreenBtn.addEventListener('click', () => {
+      toggleFullscreen();
+    });
     restartBtn.addEventListener('click', resetGame);
+
+    document.addEventListener('fullscreenchange', () => {
+      updateButtons();
+      draw(performance.now());
+    });
 
     loadDifficulty();
     loadBestTime();
