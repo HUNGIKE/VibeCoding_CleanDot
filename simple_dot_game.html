@@ -42,7 +42,8 @@
     }
 
     .toolbar-actions,
-    .lang-switch {
+    .lang-switch,
+    .difficulty-switch {
       display: flex;
       gap: 8px;
       font-size: 13px;
@@ -266,6 +267,11 @@
         <button id="pauseBtn" class="action-btn" type="button"></button>
         <button id="restartBtn" class="action-btn" type="button"></button>
       </div>
+      <div class="difficulty-switch">
+        <button id="difficulty-easy" class="action-btn" type="button">Easy</button>
+        <button id="difficulty-normal" class="action-btn active" type="button">Normal</button>
+        <button id="difficulty-hard" class="action-btn" type="button">Hard</button>
+      </div>
       <div class="lang-switch">
         <button id="lang-en" class="lang-btn" type="button">English</button>
         <button id="lang-zh" class="lang-btn" type="button">Traditional Chinese</button>
@@ -318,6 +324,9 @@
     const statusEl = document.getElementById('status');
     const langEnBtn = document.getElementById('lang-en');
     const langZhBtn = document.getElementById('lang-zh');
+    const difficultyEasyBtn = document.getElementById('difficulty-easy');
+    const difficultyNormalBtn = document.getElementById('difficulty-normal');
+    const difficultyHardBtn = document.getElementById('difficulty-hard');
     const pauseBtn = document.getElementById('pauseBtn');
     const restartBtn = document.getElementById('restartBtn');
     const invincibleTextEl = document.getElementById('invincibleText');
@@ -346,6 +355,30 @@
     const MAX_RED_INVINCIBLE_MS = 20000;
     const MAX_ANGLE_JITTER = Math.PI / 18;
     const BEST_TIME_STORAGE_KEY = 'red-dot-game-best-time-ms';
+    const DIFFICULTY_STORAGE_KEY = 'red-dot-game-difficulty';
+    const DIFFICULTY_CONFIG = {
+      easy: {
+        redSpeed: 225,
+        blueSpeed: 145,
+        yellowCount: 38,
+        greenCount: 12,
+        newBlueSafeMs: 3600,
+      },
+      normal: {
+        redSpeed: RED_SPEED,
+        blueSpeed: BLUE_SPEED,
+        yellowCount: YELLOW_COUNT,
+        greenCount: GREEN_COUNT,
+        newBlueSafeMs: NEW_BLUE_SAFE_MS,
+      },
+      hard: {
+        redSpeed: 200,
+        blueSpeed: 195,
+        yellowCount: 62,
+        greenCount: 8,
+        newBlueSafeMs: 2200,
+      }
+    };
 
     let keys = {};
     let touchKeys = {};
@@ -360,6 +393,7 @@
     let elapsedMs = 0;
     let bestTimeMs = null;
     let moveTarget = null;
+    let currentDifficulty = 'normal';
 
     let red;
     let yellows = [];
@@ -383,6 +417,10 @@
         HUD_YELLOW: '剩餘黃點',
         HUD_BLUE: '藍點數量',
         HUD_GREEN: '剩餘綠點',
+        DIFFICULTY_LABEL: '難度',
+        DIFFICULTY_EASY: '簡單',
+        DIFFICULTY_NORMAL: '普通',
+        DIFFICULTY_HARD: '困難',
         HUD_BEST_EMPTY: '尚無',
         STATUS_READY: '按開始、空白鍵或 R 開始新的一局',
         STATUS_START: '開始',
@@ -415,6 +453,10 @@
         HUD_YELLOW: 'Yellow Left',
         HUD_BLUE: 'Blue Dots',
         HUD_GREEN: 'Green Left',
+        DIFFICULTY_LABEL: 'Difficulty',
+        DIFFICULTY_EASY: 'Easy',
+        DIFFICULTY_NORMAL: 'Normal',
+        DIFFICULTY_HARD: 'Hard',
         HUD_BEST_EMPTY: 'None',
         STATUS_READY: 'Press Start, Space, or R to begin a new run',
         STATUS_START: 'Go!',
@@ -462,10 +504,15 @@
       return prefersTraditionalChinese ? 'zh-Hant' : 'en';
     }
 
+    function getBestTimeStorageKey() {
+      return `${BEST_TIME_STORAGE_KEY}:${currentDifficulty}`;
+    }
+
     function loadBestTime() {
       try {
-        const raw = localStorage.getItem(BEST_TIME_STORAGE_KEY);
-        const parsed = Number(raw);
+        const raw = localStorage.getItem(getBestTimeStorageKey());
+        const legacyRaw = localStorage.getItem(BEST_TIME_STORAGE_KEY);
+        const parsed = Number(raw ?? legacyRaw);
         bestTimeMs = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
       } catch {
         bestTimeMs = null;
@@ -475,7 +522,24 @@
     function saveBestTime(ms) {
       bestTimeMs = ms;
       try {
-        localStorage.setItem(BEST_TIME_STORAGE_KEY, String(ms));
+        localStorage.setItem(getBestTimeStorageKey(), String(ms));
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+    function loadDifficulty() {
+      try {
+        const stored = localStorage.getItem(DIFFICULTY_STORAGE_KEY);
+        currentDifficulty = DIFFICULTY_CONFIG[stored] ? stored : 'normal';
+      } catch {
+        currentDifficulty = 'normal';
+      }
+    }
+
+    function saveDifficulty() {
+      try {
+        localStorage.setItem(DIFFICULTY_STORAGE_KEY, currentDifficulty);
       } catch {
         // ignore storage errors
       }
@@ -500,6 +564,15 @@
       pauseBtn.textContent = paused ? t('RESUME') : t('PAUSE');
       pauseBtn.classList.toggle('active', paused);
       restartBtn.textContent = hasStarted ? t('RESTART') : t('START');
+      difficultyEasyBtn.textContent = t('DIFFICULTY_EASY');
+      difficultyNormalBtn.textContent = t('DIFFICULTY_NORMAL');
+      difficultyHardBtn.textContent = t('DIFFICULTY_HARD');
+      difficultyEasyBtn.classList.toggle('active', currentDifficulty === 'easy');
+      difficultyNormalBtn.classList.toggle('active', currentDifficulty === 'normal');
+      difficultyHardBtn.classList.toggle('active', currentDifficulty === 'hard');
+      difficultyEasyBtn.title = `${t('DIFFICULTY_LABEL')}: ${t('DIFFICULTY_EASY')}`;
+      difficultyNormalBtn.title = `${t('DIFFICULTY_LABEL')}: ${t('DIFFICULTY_NORMAL')}`;
+      difficultyHardBtn.title = `${t('DIFFICULTY_LABEL')}: ${t('DIFFICULTY_HARD')}`;
     }
 
     function renderTexts() {
@@ -609,14 +682,15 @@
     }
 
     function prepareRound() {
+      const config = DIFFICULTY_CONFIG[currentDifficulty] || DIFFICULTY_CONFIG.normal;
       red = {
         x: WIDTH / 2,
         y: HEIGHT / 2,
         radius: RED_RADIUS,
         safeUntil: 0,
       };
-      yellows = createDots(YELLOW_COUNT, YELLOW_RADIUS);
-      greens = createDots(GREEN_COUNT, GREEN_RADIUS, yellows);
+      yellows = createDots(config.yellowCount, YELLOW_RADIUS);
+      greens = createDots(config.greenCount, GREEN_RADIUS, yellows);
       blues = [];
       keys = {};
       touchKeys = {};
@@ -690,21 +764,23 @@
       if (dx !== 0 || dy !== 0) {
         clearMoveTarget();
         const dir = normalize(dx, dy);
-        red.x += dir.x * RED_SPEED * dt;
-        red.y += dir.y * RED_SPEED * dt;
+        const redSpeed = (DIFFICULTY_CONFIG[currentDifficulty] || DIFFICULTY_CONFIG.normal).redSpeed;
+        red.x += dir.x * redSpeed * dt;
+        red.y += dir.y * redSpeed * dt;
       } else if (moveTarget) {
         const toTargetX = moveTarget.x - red.x;
         const toTargetY = moveTarget.y - red.y;
         const distanceToTarget = Math.hypot(toTargetX, toTargetY);
 
-        if (distanceToTarget <= RED_SPEED * dt) {
+        const redSpeed = (DIFFICULTY_CONFIG[currentDifficulty] || DIFFICULTY_CONFIG.normal).redSpeed;
+        if (distanceToTarget <= redSpeed * dt) {
           red.x = moveTarget.x;
           red.y = moveTarget.y;
           clearMoveTarget();
         } else {
           const dir = normalize(toTargetX, toTargetY);
-          red.x += dir.x * RED_SPEED * dt;
-          red.y += dir.y * RED_SPEED * dt;
+          red.x += dir.x * redSpeed * dt;
+          red.y += dir.y * redSpeed * dt;
         }
       }
 
@@ -714,8 +790,9 @@
 
     function convertYellowToBlue(index, now) {
       const yellow = yellows[index];
+      const config = DIFFICULTY_CONFIG[currentDifficulty] || DIFFICULTY_CONFIG.normal;
       const dir = normalize(yellow.x - red.x, yellow.y - red.y);
-      const velocity = applyAngleJitter(dir.x * BLUE_SPEED, dir.y * BLUE_SPEED);
+      const velocity = applyAngleJitter(dir.x * config.blueSpeed, dir.y * config.blueSpeed);
 
       blues.push({
         x: yellow.x,
@@ -723,7 +800,7 @@
         radius: BLUE_RADIUS,
         vx: velocity.vx,
         vy: velocity.vy,
-        safeUntil: now + NEW_BLUE_SAFE_MS,
+        safeUntil: now + config.newBlueSafeMs,
       });
 
       yellows.splice(index, 1);
@@ -964,6 +1041,17 @@
       };
     }
 
+    function setDifficulty(difficulty, options = {}) {
+      if (!DIFFICULTY_CONFIG[difficulty] || currentDifficulty === difficulty) return;
+      currentDifficulty = difficulty;
+      saveDifficulty();
+      loadBestTime();
+      renderTexts();
+      if (options.restart !== false) {
+        prepareRound();
+      }
+    }
+
     function runBasicTests() {
       console.assert(t('TITLE') === I18N[currentLang].TITLE, 't() should return localized title');
       console.assert(tf('INVINCIBLE_REMAINING', { SECONDS: 7 }).includes('7'), 'tf() should replace placeholders');
@@ -982,6 +1070,8 @@
       updateRed(0.5);
       console.assert(red.x > 100 && red.y === 100, 'updateRed() should move toward click target when no manual input is held');
       clearMoveTarget();
+      console.assert(getBestTimeStorageKey().endsWith(currentDifficulty), 'best time storage key should include the current difficulty');
+      console.assert(DIFFICULTY_CONFIG.easy.yellowCount < DIFFICULTY_CONFIG.hard.yellowCount, 'difficulty presets should differ');
     }
 
     window.addEventListener('keydown', (e) => {
@@ -1048,6 +1138,9 @@
 
     langEnBtn.addEventListener('click', () => setLanguage('en'));
     langZhBtn.addEventListener('click', () => setLanguage('zh-Hant'));
+    difficultyEasyBtn.addEventListener('click', () => setDifficulty('easy'));
+    difficultyNormalBtn.addEventListener('click', () => setDifficulty('normal'));
+    difficultyHardBtn.addEventListener('click', () => setDifficulty('hard'));
     pauseBtn.addEventListener('click', () => {
       if (!hasStarted) {
         startGame();
@@ -1057,6 +1150,7 @@
     });
     restartBtn.addEventListener('click', resetGame);
 
+    loadDifficulty();
     loadBestTime();
     currentLang = detectInitialLanguage();
     prepareRound();
