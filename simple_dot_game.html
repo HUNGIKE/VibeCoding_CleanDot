@@ -247,6 +247,18 @@
     .lose { color: #b30000; }
     .paused { color: #7a5a00; }
 
+    .screen-reader-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
     @media (max-width: 860px) {
       .hud {
         grid-template-columns: repeat(2, minmax(130px, 1fr));
@@ -323,6 +335,7 @@
     </div>
 
     <div id="status" class="status"></div>
+    <div id="threatAnnouncer" class="screen-reader-only" aria-live="polite"></div>
   </div>
 
   <script>
@@ -346,6 +359,7 @@
     const hudBlueValueEl = document.getElementById('hudBlueValue');
     const hudGreenValueEl = document.getElementById('hudGreenValue');
     const hudDangerValueEl = document.getElementById('hudDangerValue');
+    const threatAnnouncerEl = document.getElementById('threatAnnouncer');
     const touchButtons = Array.from(document.querySelectorAll('.touch-btn'));
 
     const WIDTH = canvas.width;
@@ -415,6 +429,7 @@
     let soundEnabled = true;
     let audioContext = null;
     let lastRunSummary = null;
+    let lastThreatAnnouncement = '';
 
     let red;
     let yellows = [];
@@ -476,7 +491,16 @@
         DANGER_SAFE: '安全',
         DANGER_WARNING: '注意',
         DANGER_HIGH: '危險',
-        FREEZE_REMAINING: '凍結 {SECONDS} 秒'
+        FREEZE_REMAINING: '凍結 {SECONDS} 秒',
+        THREAT_LEFT: '左方',
+        THREAT_RIGHT: '右方',
+        THREAT_UP: '上方',
+        THREAT_DOWN: '下方',
+        THREAT_DOWN_LEFT: '左下方',
+        THREAT_DOWN_RIGHT: '右下方',
+        THREAT_UP_LEFT: '左上方',
+        THREAT_UP_RIGHT: '右上方',
+        THREAT_ANNOUNCE: '最近威脅在{DIRECTION}，距離約 {DISTANCE}'
       },
       en: {
         TITLE: 'Red Dot Clears Yellow Dots',
@@ -529,7 +553,16 @@
         DANGER_SAFE: 'Safe',
         DANGER_WARNING: 'Warning',
         DANGER_HIGH: 'Danger',
-        FREEZE_REMAINING: 'Freeze {SECONDS}s'
+        FREEZE_REMAINING: 'Freeze {SECONDS}s',
+        THREAT_LEFT: 'left',
+        THREAT_RIGHT: 'right',
+        THREAT_UP: 'up',
+        THREAT_DOWN: 'down',
+        THREAT_DOWN_LEFT: 'down-left',
+        THREAT_DOWN_RIGHT: 'down-right',
+        THREAT_UP_LEFT: 'up-left',
+        THREAT_UP_RIGHT: 'up-right',
+        THREAT_ANNOUNCE: 'Nearest threat {DIRECTION}, about {DISTANCE} away'
       }
     };
 
@@ -733,6 +766,76 @@
         distance: nearestDistance,
         intensity: 1 - (nearestDistance - DANGER_HIGH_DISTANCE) / (DANGER_WARNING_DISTANCE - DANGER_HIGH_DISTANCE),
       };
+    }
+
+    function getNearestBlueThreat(now = performance.now()) {
+      let nearestBlue = null;
+      let nearestDistance = Infinity;
+
+      for (const blue of blues) {
+        if (now < blue.safeUntil) continue;
+        const centerDistance = distance(red.x, red.y, blue.x, blue.y);
+        if (centerDistance < nearestDistance) {
+          nearestDistance = centerDistance;
+          nearestBlue = blue;
+        }
+      }
+
+      return nearestBlue
+        ? { blue: nearestBlue, distance: nearestDistance }
+        : null;
+    }
+
+    function getThreatDirectionKey(dx, dy) {
+      const angle = Math.atan2(dy, dx);
+      const slice = Math.round(angle / (Math.PI / 4));
+
+      switch (slice) {
+        case 0:
+          return 'THREAT_RIGHT';
+        case 1:
+          return 'THREAT_DOWN_RIGHT';
+        case 2:
+          return 'THREAT_DOWN';
+        case 3:
+          return 'THREAT_DOWN_LEFT';
+        case 4:
+        case -4:
+          return 'THREAT_LEFT';
+        case -3:
+          return 'THREAT_UP_LEFT';
+        case -2:
+          return 'THREAT_UP';
+        default:
+          return 'THREAT_UP_RIGHT';
+      }
+    }
+
+    function updateThreatAnnouncer(now = performance.now()) {
+      if (!threatAnnouncerEl) return;
+      if (!hasStarted || paused || gameOver) {
+        threatAnnouncerEl.textContent = '';
+        lastThreatAnnouncement = '';
+        return;
+      }
+
+      const threat = getNearestBlueThreat(now);
+      if (!threat) {
+        threatAnnouncerEl.textContent = '';
+        lastThreatAnnouncement = '';
+        return;
+      }
+
+      const dx = threat.blue.x - red.x;
+      const dy = threat.blue.y - red.y;
+      const direction = t(getThreatDirectionKey(dx, dy));
+      const distanceLabel = `${Math.max(0, Math.round(threat.distance - red.radius - threat.blue.radius))} px`;
+      const announcement = tf('THREAT_ANNOUNCE', { DIRECTION: direction, DISTANCE: distanceLabel });
+
+      if (announcement !== lastThreatAnnouncement) {
+        threatAnnouncerEl.textContent = announcement;
+        lastThreatAnnouncement = announcement;
+      }
     }
 
     function updateHUD(now = performance.now()) {
@@ -1236,6 +1339,51 @@
       ctx.restore();
     }
 
+    function drawNearestThreatIndicator(now) {
+      if (!hasStarted || paused || gameOver) return;
+
+      const threat = getNearestBlueThreat(now);
+      if (!threat) return;
+
+      const dx = threat.blue.x - red.x;
+      const dy = threat.blue.y - red.y;
+      const edgeDistance = Math.max(0, threat.distance - red.radius - threat.blue.radius);
+      const danger = getDangerState(now);
+      const alpha = danger.key === 'DANGER_HIGH' ? 0.95 : danger.key === 'DANGER_WARNING' ? 0.72 : 0.42;
+      const length = danger.key === 'DANGER_HIGH' ? 36 : 28;
+      const width = danger.key === 'DANGER_HIGH' ? 16 : 13;
+      const arrowDistance = red.radius + 26;
+      const dir = normalize(dx, dy);
+      const baseX = red.x + dir.x * arrowDistance;
+      const baseY = red.y + dir.y * arrowDistance;
+      const tipX = baseX + dir.x * length;
+      const tipY = baseY + dir.y * length;
+      const perpX = -dir.y;
+      const perpY = dir.x;
+
+      ctx.save();
+      ctx.fillStyle = `rgba(179, 0, 0, ${alpha.toFixed(3)})`;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(baseX + perpX * width, baseY + perpY * width);
+      ctx.lineTo(baseX - perpX * width, baseY - perpY * width);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      const labelX = baseX + dir.x * (length + 22);
+      const labelY = baseY + dir.y * (length + 18);
+      const distanceLabel = `${Math.round(edgeDistance)}px`;
+      ctx.fillStyle = `rgba(60, 20, 20, ${Math.min(0.95, alpha + 0.08).toFixed(3)})`;
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = dir.x >= 0 ? 'left' : 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(distanceLabel, labelX, labelY);
+      ctx.restore();
+    }
+
     function drawRed(now) {
       const remaining = red.safeUntil - now;
       const safe = remaining > 0;
@@ -1372,6 +1520,7 @@
     function draw(now) {
       updateInvincibleUI(now);
       updateHUD();
+      updateThreatAnnouncer(now);
       ctx.clearRect(0, 0, WIDTH, HEIGHT);
       drawYellows();
       drawGreens();
@@ -1381,6 +1530,7 @@
       drawMoveTarget();
       drawFreezeOverlay(now);
       drawDangerAura(now);
+      drawNearestThreatIndicator(now);
       drawRed(now);
 
       if (!hasStarted && !gameOver) {
@@ -1452,70 +1602,122 @@
     }
 
     function runBasicTests() {
-      console.assert(t('TITLE') === I18N[currentLang].TITLE, 't() should return localized title');
-      console.assert(tf('INVINCIBLE_REMAINING', { SECONDS: 7 }).includes('7'), 'tf() should replace placeholders');
-      const n = normalize(3, 4);
-      console.assert(Math.abs(n.x - 0.6) < 1e-9 && Math.abs(n.y - 0.8) < 1e-9, 'normalize() should normalize vectors');
-      console.assert(['en', 'zh-Hant'].includes(detectInitialLanguage()), 'detectInitialLanguage() should return a supported language');
-      console.assert(formatSeconds(1534) === '1.5s', 'formatSeconds() should show 1 decimal place');
-      console.assert(createDots(5, 8).length === 5, 'createDots() should create requested number of dots under normal conditions');
-      red = { x: 100, y: 100, radius: RED_RADIUS, safeUntil: 0 };
-      yellows = [
-        { x: 180, y: 100, radius: YELLOW_RADIUS },
-        { x: 130, y: 100, radius: YELLOW_RADIUS }
-      ];
-      console.assert(getNearestYellow().x === 130, 'getNearestYellow() should return the closest yellow target');
-      touchKeys = { ArrowLeft: true };
-      console.assert(getInputAxis().dx === -1 && getInputAxis().dy === 0, 'touch controls should feed movement input');
-      releaseAllTouchKeys();
-      red = { x: 100, y: 100, radius: RED_RADIUS, safeUntil: 0 };
-      setMoveTarget(-50, HEIGHT + 50);
-      console.assert(moveTarget.x === RED_RADIUS && moveTarget.y === HEIGHT - RED_RADIUS, 'setMoveTarget() should clamp inside the arena');
-      setMoveTarget(160, 100);
-      updateRed(0.5);
-      console.assert(red.x > 100 && red.y === 100, 'updateRed() should move toward click target when no manual input is held');
-      clearMoveTarget();
-      console.assert(getBestTimeStorageKey().endsWith(currentDifficulty), 'best time storage key should include the current difficulty');
-      soundEnabled = true;
-      console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound toggle labels should exist');
-      soundEnabled = false;
-      console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound off label should exist');
-      soundEnabled = true;
-      console.assert(DIFFICULTY_CONFIG.easy.yellowCount < DIFFICULTY_CONFIG.hard.yellowCount, 'difficulty presets should differ');
-      purples = [{ x: red.x, y: red.y, radius: PURPLE_RADIUS }];
-      freezeUntil = 0;
-      updatePurpleCollisions(1000);
-      console.assert(freezeUntil === 1000 + PURPLE_FREEZE_MS, 'purple pickup should start a freeze timer');
-      blues = [{ x: 120, y: 100, radius: BLUE_RADIUS, vx: 100, vy: 0, safeUntil: 0 }];
-      updateBlues(1, 1001);
-      console.assert(blues[0].x === 120, 'frozen blue dots should not move while freeze is active');
-      freezeUntil = 0;
-      blues = [{ x: red.x + red.radius + BLUE_RADIUS + 20, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
-      console.assert(getDangerState(0).key === 'DANGER_HIGH', 'getDangerState() should flag nearby active blue dots as dangerous');
-      blues = [{ x: red.x + red.radius + BLUE_RADIUS + 220, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
-      console.assert(getDangerState(0).key === 'DANGER_SAFE', 'getDangerState() should report safe when hazards are far away');
-      blues = [];
-      bestTimeMs = 4200;
-      elapsedMs = 4200;
-      currentDifficulty = 'hard';
-      lastRunSummary = {
-        result: 'win',
-        timeMs: elapsedMs,
+      const originalState = {
+        keys,
+        touchKeys,
+        gameOver,
+        paused,
+        hasStarted,
+        lastTime,
+        statusKey,
+        statusParams: { ...statusParams },
+        elapsedMs,
         bestTimeMs,
-        difficulty: currentDifficulty,
-        newBest: true,
+        moveTarget: moveTarget ? { ...moveTarget } : null,
+        currentDifficulty,
+        soundEnabled,
+        lastRunSummary: lastRunSummary ? { ...lastRunSummary } : null,
+        red: red ? { ...red } : null,
+        yellows: yellows.map((item) => ({ ...item })),
+        blues: blues.map((item) => ({ ...item })),
+        greens: greens.map((item) => ({ ...item })),
+        purples: purples.map((item) => ({ ...item })),
+        freezeUntil,
+        initialYellowCount,
       };
-      console.assert(lastRunSummary.newBest === true && lastRunSummary.bestTimeMs === 4200, 'result summary should preserve win details');
-      gameOver = true;
-      let resetCalls = 0;
-      const originalResetGame = resetGame;
-      resetGame = () => { resetCalls += 1; };
-      canvas.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 10, clientY: 10 }));
-      console.assert(resetCalls === 1, 'clicking the arena after game over should restart');
-      resetGame = originalResetGame;
-      gameOver = false;
-      lastRunSummary = null;
-      blues = [];
+
+      try {
+        console.assert(t('TITLE') === I18N[currentLang].TITLE, 't() should return localized title');
+        console.assert(tf('INVINCIBLE_REMAINING', { SECONDS: 7 }).includes('7'), 'tf() should replace placeholders');
+        const n = normalize(3, 4);
+        console.assert(Math.abs(n.x - 0.6) < 1e-9 && Math.abs(n.y - 0.8) < 1e-9, 'normalize() should normalize vectors');
+        console.assert(['en', 'zh-Hant'].includes(detectInitialLanguage()), 'detectInitialLanguage() should return a supported language');
+        console.assert(formatSeconds(1534) === '1.5s', 'formatSeconds() should show 1 decimal place');
+        console.assert(createDots(5, 8).length === 5, 'createDots() should create requested number of dots under normal conditions');
+        red = { x: 100, y: 100, radius: RED_RADIUS, safeUntil: 0 };
+        yellows = [
+          { x: 180, y: 100, radius: YELLOW_RADIUS },
+          { x: 130, y: 100, radius: YELLOW_RADIUS }
+        ];
+        console.assert(getNearestYellow().x === 130, 'getNearestYellow() should return the closest yellow target');
+        touchKeys = { ArrowLeft: true };
+        console.assert(getInputAxis().dx === -1 && getInputAxis().dy === 0, 'touch controls should feed movement input');
+        releaseAllTouchKeys();
+        red = { x: 100, y: 100, radius: RED_RADIUS, safeUntil: 0 };
+        setMoveTarget(-50, HEIGHT + 50);
+        console.assert(moveTarget.x === RED_RADIUS && moveTarget.y === HEIGHT - RED_RADIUS, 'setMoveTarget() should clamp inside the arena');
+        setMoveTarget(160, 100);
+        updateRed(0.5);
+        console.assert(red.x > 100 && red.y === 100, 'updateRed() should move toward click target when no manual input is held');
+        clearMoveTarget();
+        console.assert(getBestTimeStorageKey().endsWith(currentDifficulty), 'best time storage key should include the current difficulty');
+        soundEnabled = true;
+        console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound toggle labels should exist');
+        soundEnabled = false;
+        console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound off label should exist');
+        soundEnabled = true;
+        console.assert(DIFFICULTY_CONFIG.easy.yellowCount < DIFFICULTY_CONFIG.hard.yellowCount, 'difficulty presets should differ');
+        purples = [{ x: red.x, y: red.y, radius: PURPLE_RADIUS }];
+        freezeUntil = 0;
+        updatePurpleCollisions(1000);
+        console.assert(freezeUntil === 1000 + PURPLE_FREEZE_MS, 'purple pickup should start a freeze timer');
+        blues = [{ x: 120, y: 100, radius: BLUE_RADIUS, vx: 100, vy: 0, safeUntil: 0 }];
+        updateBlues(1, 1001);
+        console.assert(blues[0].x === 120, 'frozen blue dots should not move while freeze is active');
+        freezeUntil = 0;
+        blues = [{ x: red.x + red.radius + BLUE_RADIUS + 20, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
+        console.assert(getDangerState(0).key === 'DANGER_HIGH', 'getDangerState() should flag nearby active blue dots as dangerous');
+        const threat = getNearestBlueThreat(0);
+        console.assert(threat && threat.blue.x === red.x + red.radius + BLUE_RADIUS + 20, 'getNearestBlueThreat() should return the nearest active blue dot');
+        console.assert(getThreatDirectionKey(20, 0) === 'THREAT_RIGHT', 'getThreatDirectionKey() should resolve rightward hazards');
+        console.assert(getThreatDirectionKey(-20, -20) === 'THREAT_UP_LEFT', 'getThreatDirectionKey() should resolve diagonal hazards');
+        blues = [{ x: red.x + red.radius + BLUE_RADIUS + 220, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
+        console.assert(getDangerState(0).key === 'DANGER_SAFE', 'getDangerState() should report safe when hazards are far away');
+        blues = [];
+        bestTimeMs = 4200;
+        elapsedMs = 4200;
+        currentDifficulty = 'hard';
+        lastRunSummary = {
+          result: 'win',
+          timeMs: elapsedMs,
+          bestTimeMs,
+          difficulty: currentDifficulty,
+          newBest: true,
+        };
+        console.assert(lastRunSummary.newBest === true && lastRunSummary.bestTimeMs === 4200, 'result summary should preserve win details');
+        gameOver = true;
+        let resetCalls = 0;
+        const originalResetGame = resetGame;
+        resetGame = () => { resetCalls += 1; };
+        canvas.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 10, clientY: 10 }));
+        console.assert(resetCalls === 1, 'clicking the arena after game over should restart');
+        resetGame = originalResetGame;
+      } finally {
+        keys = originalState.keys;
+        touchKeys = originalState.touchKeys;
+        gameOver = originalState.gameOver;
+        paused = originalState.paused;
+        hasStarted = originalState.hasStarted;
+        lastTime = originalState.lastTime;
+        statusKey = originalState.statusKey;
+        statusParams = { ...originalState.statusParams };
+        elapsedMs = originalState.elapsedMs;
+        bestTimeMs = originalState.bestTimeMs;
+        moveTarget = originalState.moveTarget ? { ...originalState.moveTarget } : null;
+        currentDifficulty = originalState.currentDifficulty;
+        soundEnabled = originalState.soundEnabled;
+        lastRunSummary = originalState.lastRunSummary ? { ...originalState.lastRunSummary } : null;
+        red = originalState.red ? { ...originalState.red } : null;
+        yellows = originalState.yellows.map((item) => ({ ...item }));
+        blues = originalState.blues.map((item) => ({ ...item }));
+        greens = originalState.greens.map((item) => ({ ...item }));
+        purples = originalState.purples.map((item) => ({ ...item }));
+        freezeUntil = originalState.freezeUntil;
+        initialYellowCount = originalState.initialYellowCount;
+        updateButtons();
+        updateHUD();
+        updateInvincibleUI();
+      }
     }
 
     window.addEventListener('keydown', (e) => {
