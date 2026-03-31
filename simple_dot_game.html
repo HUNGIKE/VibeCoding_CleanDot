@@ -4,48 +4,70 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Red Dot Game</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='18' fill='%23d40000'/%3E%3C/svg%3E" />
   <style>
+    :root {
+      color-scheme: light;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #f5f5f5;
+      background: linear-gradient(180deg, #f7f7f7 0%, #ececec 100%);
       font-family: Arial, sans-serif;
+      color: #222;
     }
 
     .wrap {
       position: relative;
       text-align: center;
       padding: 20px;
+      width: min(100%, 940px);
+    }
+
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
     }
 
     .lang-switch {
-      position: absolute;
-      top: 0;
-      right: 20px;
       display: flex;
       gap: 8px;
       font-size: 13px;
     }
 
-    .lang-btn {
+    .lang-btn,
+    .action-btn {
       color: #444;
       cursor: pointer;
       user-select: none;
-      padding: 5px 12px;
+      padding: 7px 12px;
       border: 1px solid #999;
       border-radius: 999px;
       background: #fff;
-      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+      font-size: 13px;
     }
 
-    .lang-btn:hover {
+    .lang-btn:hover,
+    .action-btn:hover {
       background: #f0f0f0;
+      transform: translateY(-1px);
     }
 
-    .lang-btn.active {
+    .lang-btn.active,
+    .action-btn.active {
       font-weight: bold;
       color: #fff;
       background: #555;
@@ -54,7 +76,7 @@
 
     h1 {
       margin: 0 0 10px;
-      font-size: 24px;
+      font-size: 28px;
     }
 
     p {
@@ -81,15 +103,88 @@
     .dot-blue { color: #1e66ff; }
     .dot-green { color: #00aa38; }
 
+    .hud {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(110px, 1fr));
+      gap: 10px;
+      margin: 14px auto 4px;
+      max-width: 780px;
+    }
+
+    .hud-card {
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid #d7d7d7;
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.04);
+    }
+
+    .hud-label {
+      display: block;
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 4px;
+    }
+
+    .hud-value {
+      font-size: 22px;
+      font-weight: bold;
+      line-height: 1.1;
+    }
+
     .game-area {
       position: relative;
       width: fit-content;
       margin: 12px auto 0;
     }
 
-    .invincible-text,
+    .invincible-text {
+      position: absolute;
+      top: 10px;
+      left: 14px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.65);
+      color: white;
+      font-weight: bold;
+      font-size: 13px;
+      min-width: 84px;
+      text-align: center;
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+      pointer-events: none;
+    }
+
+    .invincible-text.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
     .invincible-bar {
-      display: none;
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 180px;
+      height: 12px;
+      background: rgba(0, 0, 0, 0.15);
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      opacity: 0;
+      transition: opacity 0.18s ease;
+      pointer-events: none;
+    }
+
+    .invincible-bar.visible {
+      opacity: 1;
+    }
+
+    #invincibleFill {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #11b94f, #54dd85);
+      transition: width 0.08s linear;
     }
 
     canvas {
@@ -97,23 +192,42 @@
       margin-top: 12px;
       background: #bdbdbd;
       border: 3px solid #666;
+      border-radius: 10px;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+      max-width: 100%;
+      height: auto;
     }
 
     .status {
       font-weight: bold;
       min-height: 24px;
-      margin-top: 8px;
+      margin-top: 10px;
+      font-size: 18px;
     }
 
     .win { color: #0b7a0b; }
     .lose { color: #b30000; }
+    .paused { color: #7a5a00; }
+
+    @media (max-width: 860px) {
+      .hud {
+        grid-template-columns: repeat(2, minmax(130px, 1fr));
+      }
+
+      .top-bar {
+        justify-content: center;
+      }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="lang-switch">
-      <span id="lang-en" class="lang-btn">English</span>
-      <span id="lang-zh" class="lang-btn">Traditional Chinese</span>
+    <div class="top-bar">
+      <button id="pauseBtn" class="action-btn" type="button"></button>
+      <div class="lang-switch">
+        <button id="lang-en" class="lang-btn" type="button">English</button>
+        <button id="lang-zh" class="lang-btn" type="button">Traditional Chinese</button>
+      </div>
     </div>
 
     <h1 id="title"></h1>
@@ -126,9 +240,17 @@
       <p class="hint"><span class="dot-label dot-green" id="legendGreenLabel"></span><span id="legendGreenText"></span></p>
     </div>
 
+    <div class="hud">
+      <div class="hud-card"><span class="hud-label" id="hudTimeLabel"></span><div class="hud-value" id="hudTimeValue">0.0s</div></div>
+      <div class="hud-card"><span class="hud-label" id="hudBestLabel"></span><div class="hud-value" id="hudBestValue">—</div></div>
+      <div class="hud-card"><span class="hud-label" id="hudYellowLabel"></span><div class="hud-value" id="hudYellowValue">0</div></div>
+      <div class="hud-card"><span class="hud-label" id="hudBlueLabel"></span><div class="hud-value" id="hudBlueValue">0</div></div>
+      <div class="hud-card"><span class="hud-label" id="hudGreenLabel"></span><div class="hud-value" id="hudGreenValue">0</div></div>
+    </div>
+
     <div class="game-area">
       <div id="invincibleText" class="invincible-text"></div>
-      <div class="invincible-bar"><div id="invincibleFill"></div></div>
+      <div id="invincibleBar" class="invincible-bar"><div id="invincibleFill"></div></div>
       <canvas id="game" width="780" height="420"></canvas>
     </div>
 
@@ -141,8 +263,15 @@
     const statusEl = document.getElementById('status');
     const langEnBtn = document.getElementById('lang-en');
     const langZhBtn = document.getElementById('lang-zh');
+    const pauseBtn = document.getElementById('pauseBtn');
     const invincibleTextEl = document.getElementById('invincibleText');
+    const invincibleBarEl = document.getElementById('invincibleBar');
     const invincibleFillEl = document.getElementById('invincibleFill');
+    const hudTimeValueEl = document.getElementById('hudTimeValue');
+    const hudBestValueEl = document.getElementById('hudBestValue');
+    const hudYellowValueEl = document.getElementById('hudYellowValue');
+    const hudBlueValueEl = document.getElementById('hudBlueValue');
+    const hudGreenValueEl = document.getElementById('hudGreenValue');
 
     const WIDTH = canvas.width;
     const HEIGHT = canvas.height;
@@ -159,12 +288,18 @@
     const RED_INVINCIBLE_MS = 3000;
     const MAX_RED_INVINCIBLE_MS = 20000;
     const MAX_ANGLE_JITTER = Math.PI / 18;
+    const BEST_TIME_STORAGE_KEY = 'red-dot-game-best-time-ms';
 
     let keys = {};
     let gameOver = false;
+    let paused = false;
+    let animationFrameId = null;
     let lastTime = 0;
     let currentLang = 'en';
     let statusKey = 'STATUS_READY';
+    let statusParams = {};
+    let elapsedMs = 0;
+    let bestTimeMs = null;
 
     let red;
     let yellows = [];
@@ -174,41 +309,59 @@
     const I18N = {
       'zh-Hant': {
         TITLE: '紅點清除黃點',
-        CONTROL_HINT: '方向鍵或 WASD 控制紅點移動, 按R重新開始',
+        CONTROL_HINT: '方向鍵或 WASD 控制紅點移動，P 暫停，R 重新開始',
         LEGEND_RED_LABEL: '● 紅點：',
         LEGEND_RED_TEXT: '玩家控制的點；',
         LEGEND_YELLOW_LABEL: '● 黃點：',
-        LEGEND_YELLOW_TEXT: '清除黃點',
+        LEGEND_YELLOW_TEXT: '碰到後會被清除，並轉成藍點',
         LEGEND_BLUE_LABEL: '● 藍點：',
         LEGEND_BLUE_TEXT: '不可碰到藍點',
         LEGEND_GREEN_LABEL: '● 綠點：',
         LEGEND_GREEN_TEXT: '碰到後紅點獲得 3 秒不受影響狀態（最多累加至 20 秒）',
-        STATUS_READY: '按 R 可重新開始',
+        HUD_TIME: '目前時間',
+        HUD_BEST: '最佳成績',
+        HUD_YELLOW: '剩餘黃點',
+        HUD_BLUE: '藍點數量',
+        HUD_GREEN: '剩餘綠點',
+        HUD_BEST_EMPTY: '尚無',
+        STATUS_READY: '按 R 開始新的一局',
         STATUS_START: '開始',
-        STATUS_WIN: '你贏了！按 R 重新開始',
+        STATUS_WIN: '你贏了！耗時 {TIME}，按 R 再玩一次',
         STATUS_LOSE: '你輸了！按 R 重新開始',
+        STATUS_PAUSED: '已暫停，按 P 繼續',
         LANG_EN: 'English',
         LANG_ZH: 'Traditional Chinese',
-        INVINCIBLE_REMAINING: '{SECONDS} sec'
+        INVINCIBLE_REMAINING: '無敵 {SECONDS} 秒',
+        PAUSE: '暫停',
+        RESUME: '繼續'
       },
       en: {
         TITLE: 'Red Dot Clears Yellow Dots',
-        CONTROL_HINT: 'Use arrow keys or WASD to move, R to reset',
+        CONTROL_HINT: 'Use arrow keys or WASD to move, P to pause, R to reset',
         LEGEND_RED_LABEL: '● Red Dot: ',
         LEGEND_RED_TEXT: 'Player-controlled dot;',
         LEGEND_YELLOW_LABEL: '● Yellow Dot: ',
-        LEGEND_YELLOW_TEXT: 'Clear yellow dots',
+        LEGEND_YELLOW_TEXT: 'Clear them to turn them into blue hazards',
         LEGEND_BLUE_LABEL: '● Blue Dot: ',
         LEGEND_BLUE_TEXT: 'Do not touch blue dots',
         LEGEND_GREEN_LABEL: '● Green Dot: ',
         LEGEND_GREEN_TEXT: 'Gain 3 seconds of invulnerability (stack up to 20 seconds)',
-        STATUS_READY: 'Press R to restart',
-        STATUS_START: 'Start',
-        STATUS_WIN: 'You win! Press R to restart',
+        HUD_TIME: 'Current Time',
+        HUD_BEST: 'Best Time',
+        HUD_YELLOW: 'Yellow Left',
+        HUD_BLUE: 'Blue Dots',
+        HUD_GREEN: 'Green Left',
+        HUD_BEST_EMPTY: 'None',
+        STATUS_READY: 'Press R to start a new run',
+        STATUS_START: 'Go!',
+        STATUS_WIN: 'You win! Time: {TIME}. Press R to play again',
         STATUS_LOSE: 'You lose! Press R to restart',
+        STATUS_PAUSED: 'Paused. Press P to continue',
         LANG_EN: 'English',
         LANG_ZH: 'Traditional Chinese',
-        INVINCIBLE_REMAINING: '{SECONDS} sec'
+        INVINCIBLE_REMAINING: 'Shield {SECONDS}s',
+        PAUSE: 'Pause',
+        RESUME: 'Resume'
       }
     };
 
@@ -224,17 +377,60 @@
       return text;
     }
 
+    function formatSeconds(ms) {
+      return `${(ms / 1000).toFixed(1)}s`;
+    }
+
     function detectInitialLanguage() {
       const langs = Array.isArray(navigator.languages) && navigator.languages.length
         ? navigator.languages
         : [navigator.language || ''];
 
-      const isTraditionalChineseRegion = langs.some((lang) => {
+      const prefersTraditionalChinese = langs.some((lang) => {
         const normalized = String(lang).toLowerCase();
-        return normalized === 'zh-tw' || normalized === 'zh-hk' || normalized === 'zh-mo';
+        return normalized.includes('zh-hant') || normalized === 'zh-tw' || normalized === 'zh-hk' || normalized === 'zh-mo';
       });
 
-      return isTraditionalChineseRegion ? 'zh-Hant' : 'en';
+      return prefersTraditionalChinese ? 'zh-Hant' : 'en';
+    }
+
+    function loadBestTime() {
+      try {
+        const raw = localStorage.getItem(BEST_TIME_STORAGE_KEY);
+        const parsed = Number(raw);
+        bestTimeMs = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      } catch {
+        bestTimeMs = null;
+      }
+    }
+
+    function saveBestTime(ms) {
+      bestTimeMs = ms;
+      try {
+        localStorage.setItem(BEST_TIME_STORAGE_KEY, String(ms));
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+    function setStatus(key, params = {}, className = 'status') {
+      statusKey = key;
+      statusParams = params;
+      statusEl.className = className;
+      statusEl.textContent = tf(statusKey, statusParams);
+    }
+
+    function updateHUD() {
+      hudTimeValueEl.textContent = formatSeconds(elapsedMs);
+      hudBestValueEl.textContent = bestTimeMs == null ? t('HUD_BEST_EMPTY') : formatSeconds(bestTimeMs);
+      hudYellowValueEl.textContent = String(yellows.length);
+      hudBlueValueEl.textContent = String(blues.length);
+      hudGreenValueEl.textContent = String(greens.length);
+    }
+
+    function updatePauseButton() {
+      pauseBtn.textContent = paused ? t('RESUME') : t('PAUSE');
+      pauseBtn.classList.toggle('active', paused);
     }
 
     function renderTexts() {
@@ -248,11 +444,18 @@
       document.getElementById('legendBlueText').textContent = t('LEGEND_BLUE_TEXT');
       document.getElementById('legendGreenLabel').textContent = t('LEGEND_GREEN_LABEL');
       document.getElementById('legendGreenText').textContent = t('LEGEND_GREEN_TEXT');
+      document.getElementById('hudTimeLabel').textContent = t('HUD_TIME');
+      document.getElementById('hudBestLabel').textContent = t('HUD_BEST');
+      document.getElementById('hudYellowLabel').textContent = t('HUD_YELLOW');
+      document.getElementById('hudBlueLabel').textContent = t('HUD_BLUE');
+      document.getElementById('hudGreenLabel').textContent = t('HUD_GREEN');
       langEnBtn.textContent = t('LANG_EN');
       langZhBtn.textContent = t('LANG_ZH');
-      statusEl.textContent = t(statusKey);
       langEnBtn.classList.toggle('active', currentLang === 'en');
       langZhBtn.classList.toggle('active', currentLang === 'zh-Hant');
+      statusEl.textContent = tf(statusKey, statusParams);
+      updatePauseButton();
+      updateHUD();
       updateInvincibleUI();
     }
 
@@ -267,6 +470,8 @@
       invincibleTextEl.textContent = remainingMs > 0
         ? tf('INVINCIBLE_REMAINING', { SECONDS: Math.ceil(remainingMs / 1000) })
         : '';
+      invincibleTextEl.classList.toggle('visible', remainingMs > 0);
+      invincibleBarEl.classList.toggle('visible', remainingMs > 0);
     }
 
     function distance(ax, ay, bx, by) {
@@ -321,6 +526,18 @@
       return result;
     }
 
+    function cancelLoop() {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    }
+
+    function queueLoop() {
+      cancelLoop();
+      animationFrameId = requestAnimationFrame(loop);
+    }
+
     function resetGame() {
       red = {
         x: WIDTH / 2,
@@ -331,12 +548,29 @@
       yellows = createDots(YELLOW_COUNT, YELLOW_RADIUS);
       greens = createDots(GREEN_COUNT, GREEN_RADIUS, yellows);
       blues = [];
+      keys = {};
       gameOver = false;
+      paused = false;
       lastTime = 0;
-      statusKey = 'STATUS_START';
-      statusEl.className = 'status';
+      elapsedMs = 0;
+      setStatus('STATUS_START');
       renderTexts();
-      requestAnimationFrame(loop);
+      queueLoop();
+    }
+
+    function togglePause() {
+      if (gameOver) return;
+      paused = !paused;
+      if (paused) {
+        setStatus('STATUS_PAUSED', {}, 'status paused');
+        lastTime = 0;
+        renderTexts();
+        draw(performance.now());
+      } else {
+        setStatus('STATUS_START');
+        renderTexts();
+        queueLoop();
+      }
     }
 
     function updateRed(dt) {
@@ -373,12 +607,16 @@
       });
 
       yellows.splice(index, 1);
+      updateHUD();
 
       if (yellows.length === 0) {
         gameOver = true;
-        statusKey = 'STATUS_WIN';
-        statusEl.className = 'status win';
+        if (bestTimeMs == null || elapsedMs < bestTimeMs) {
+          saveBestTime(elapsedMs);
+        }
+        setStatus('STATUS_WIN', { TIME: formatSeconds(elapsedMs) }, 'status win');
         renderTexts();
+        cancelLoop();
       }
     }
 
@@ -398,6 +636,7 @@
         if (distance(red.x, red.y, g.x, g.y) <= red.radius + g.radius) {
           red.safeUntil = Math.min(now + MAX_RED_INVINCIBLE_MS, Math.max(red.safeUntil, now) + RED_INVINCIBLE_MS);
           greens.splice(i, 1);
+          updateHUD();
           updateInvincibleUI(now);
         }
       }
@@ -437,9 +676,9 @@
         const blueSafe = now < blue.safeUntil;
         if (!blueSafe && !redSafe && distance(red.x, red.y, blue.x, blue.y) <= red.radius + blue.radius) {
           gameOver = true;
-          statusKey = 'STATUS_LOSE';
-          statusEl.className = 'status lose';
+          setStatus('STATUS_LOSE', {}, 'status lose');
           renderTexts();
+          cancelLoop();
           return;
         }
       }
@@ -502,13 +741,27 @@
       ctx.globalAlpha = 1;
     }
 
+    function drawPausedOverlay() {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 30px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(t('STATUS_PAUSED'), WIDTH / 2, HEIGHT / 2);
+    }
+
     function draw(now) {
       updateInvincibleUI(now);
+      updateHUD();
       ctx.clearRect(0, 0, WIDTH, HEIGHT);
       drawYellows();
       drawGreens();
       drawBlues(now);
       drawRed(now);
+      if (paused && !gameOver) {
+        drawPausedOverlay();
+      }
     }
 
     function loop(timestamp) {
@@ -517,9 +770,15 @@
         return;
       }
 
+      if (paused) {
+        draw(timestamp);
+        return;
+      }
+
       if (lastTime === 0) lastTime = timestamp;
       const dt = Math.min((timestamp - lastTime) / 1000, 0.025);
       lastTime = timestamp;
+      elapsedMs += dt * 1000;
 
       updateRed(dt);
       updateYellowCollisions(timestamp);
@@ -529,17 +788,19 @@
       }
       draw(timestamp);
 
-      if (!gameOver) {
-        requestAnimationFrame(loop);
+      if (!gameOver && !paused) {
+        animationFrameId = requestAnimationFrame(loop);
       }
     }
 
     function runBasicTests() {
       console.assert(t('TITLE') === I18N[currentLang].TITLE, 't() should return localized title');
-      console.assert(tf('INVINCIBLE_REMAINING', { SECONDS: 7 }) === '7 sec', 'tf() should replace placeholders');
+      console.assert(tf('INVINCIBLE_REMAINING', { SECONDS: 7 }).includes('7'), 'tf() should replace placeholders');
       const n = normalize(3, 4);
       console.assert(Math.abs(n.x - 0.6) < 1e-9 && Math.abs(n.y - 0.8) < 1e-9, 'normalize() should normalize vectors');
-      console.assert(detectInitialLanguage() === 'en' || detectInitialLanguage() === 'zh-Hant', 'detectInitialLanguage() should return a supported language');
+      console.assert(['en', 'zh-Hant'].includes(detectInitialLanguage()), 'detectInitialLanguage() should return a supported language');
+      console.assert(formatSeconds(1534) === '1.5s', 'formatSeconds() should show 1 decimal place');
+      console.assert(createDots(5, 8).length === 5, 'createDots() should create requested number of dots under normal conditions');
     }
 
     window.addEventListener('keydown', (e) => {
@@ -547,13 +808,17 @@
 
       if ([
         'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-        'w', 'a', 's', 'd', 'W', 'A', 'S', 'D'
+        'w', 'a', 's', 'd', 'W', 'A', 'S', 'D', ' '
       ].includes(e.key)) {
         e.preventDefault();
       }
 
       if (e.key === 'r' || e.key === 'R') {
         resetGame();
+      }
+
+      if (e.key === 'p' || e.key === 'P') {
+        togglePause();
       }
     });
 
@@ -563,9 +828,11 @@
 
     langEnBtn.addEventListener('click', () => setLanguage('en'));
     langZhBtn.addEventListener('click', () => setLanguage('zh-Hant'));
+    pauseBtn.addEventListener('click', togglePause);
 
-    currentLang = 'en'; // detectInitialLanguage();
-    statusKey = 'STATUS_READY';
+    loadBestTime();
+    currentLang = detectInitialLanguage();
+    setStatus('STATUS_READY');
     renderTexts();
     runBasicTests();
     resetGame();
