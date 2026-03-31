@@ -359,6 +359,7 @@
     let statusParams = {};
     let elapsedMs = 0;
     let bestTimeMs = null;
+    let moveTarget = null;
 
     let red;
     let yellows = [];
@@ -368,7 +369,7 @@
     const I18N = {
       'zh-Hant': {
         TITLE: '紅點清除黃點',
-        CONTROL_HINT: '方向鍵 / WASD / 觸控按鈕移動，P 暫停，R 重新開始，空白鍵開始',
+        CONTROL_HINT: '方向鍵 / WASD / 觸控按鈕移動，也可點擊畫面自動前往，P 暫停，R 重新開始，空白鍵開始',
         LEGEND_RED_LABEL: '● 紅點：',
         LEGEND_RED_TEXT: '玩家控制的點；',
         LEGEND_YELLOW_LABEL: '● 黃點：',
@@ -400,7 +401,7 @@
       },
       en: {
         TITLE: 'Red Dot Clears Yellow Dots',
-        CONTROL_HINT: 'Use arrow keys, WASD, or touch buttons. P to pause, R to reset, Space to start',
+        CONTROL_HINT: 'Use arrow keys, WASD, or touch buttons, or click the arena to move there. P to pause, R to reset, Space to start',
         LEGEND_RED_LABEL: '● Red Dot: ',
         LEGEND_RED_TEXT: 'Player-controlled dot;',
         LEGEND_YELLOW_LABEL: '● Yellow Dot: ',
@@ -624,6 +625,7 @@
       hasStarted = false;
       lastTime = 0;
       elapsedMs = 0;
+      moveTarget = null;
       setStatus('STATUS_WAITING');
       renderTexts();
       cancelLoop();
@@ -671,13 +673,39 @@
       return { dx, dy };
     }
 
+    function clearMoveTarget() {
+      moveTarget = null;
+    }
+
+    function setMoveTarget(x, y) {
+      moveTarget = {
+        x: clamp(x, red.radius, WIDTH - red.radius),
+        y: clamp(y, red.radius, HEIGHT - red.radius),
+      };
+    }
+
     function updateRed(dt) {
       const { dx, dy } = getInputAxis();
 
       if (dx !== 0 || dy !== 0) {
+        clearMoveTarget();
         const dir = normalize(dx, dy);
         red.x += dir.x * RED_SPEED * dt;
         red.y += dir.y * RED_SPEED * dt;
+      } else if (moveTarget) {
+        const toTargetX = moveTarget.x - red.x;
+        const toTargetY = moveTarget.y - red.y;
+        const distanceToTarget = Math.hypot(toTargetX, toTargetY);
+
+        if (distanceToTarget <= RED_SPEED * dt) {
+          red.x = moveTarget.x;
+          red.y = moveTarget.y;
+          clearMoveTarget();
+        } else {
+          const dir = normalize(toTargetX, toTargetY);
+          red.x += dir.x * RED_SPEED * dt;
+          red.y += dir.y * RED_SPEED * dt;
+        }
       }
 
       red.x = clamp(red.x, red.radius, WIDTH - red.radius);
@@ -833,6 +861,24 @@
       ctx.globalAlpha = 1;
     }
 
+    function drawMoveTarget() {
+      if (!moveTarget || !hasStarted || paused || gameOver) return;
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(180, 40, 40, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(moveTarget.x, moveTarget.y, 14, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(moveTarget.x - 8, moveTarget.y);
+      ctx.lineTo(moveTarget.x + 8, moveTarget.y);
+      ctx.moveTo(moveTarget.x, moveTarget.y - 8);
+      ctx.lineTo(moveTarget.x, moveTarget.y + 8);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     function drawOverlay(text, buttonText) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -861,6 +907,7 @@
       drawYellows();
       drawGreens();
       drawBlues(now);
+      drawMoveTarget();
       drawRed(now);
 
       if (!hasStarted && !gameOver) {
@@ -907,6 +954,16 @@
       touchKeys = {};
     }
 
+    function getCanvasPoint(event) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = WIDTH / rect.width;
+      const scaleY = HEIGHT / rect.height;
+      return {
+        x: (event.clientX - rect.left) * scaleX,
+        y: (event.clientY - rect.top) * scaleY,
+      };
+    }
+
     function runBasicTests() {
       console.assert(t('TITLE') === I18N[currentLang].TITLE, 't() should return localized title');
       console.assert(tf('INVINCIBLE_REMAINING', { SECONDS: 7 }).includes('7'), 'tf() should replace placeholders');
@@ -918,6 +975,13 @@
       touchKeys = { ArrowLeft: true };
       console.assert(getInputAxis().dx === -1 && getInputAxis().dy === 0, 'touch controls should feed movement input');
       releaseAllTouchKeys();
+      red = { x: 100, y: 100, radius: RED_RADIUS, safeUntil: 0 };
+      setMoveTarget(-50, HEIGHT + 50);
+      console.assert(moveTarget.x === RED_RADIUS && moveTarget.y === HEIGHT - RED_RADIUS, 'setMoveTarget() should clamp inside the arena');
+      setMoveTarget(160, 100);
+      updateRed(0.5);
+      console.assert(red.x > 100 && red.y === 100, 'updateRed() should move toward click target when no manual input is held');
+      clearMoveTarget();
     }
 
     window.addEventListener('keydown', (e) => {
@@ -950,6 +1014,16 @@
     window.addEventListener('blur', () => {
       keys = {};
       releaseAllTouchKeys();
+      clearMoveTarget();
+    });
+
+    canvas.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      if (!hasStarted) startGame();
+      const point = getCanvasPoint(event);
+      setMoveTarget(point.x, point.y);
+      draw(performance.now());
     });
 
     for (const button of touchButtons) {
