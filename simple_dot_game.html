@@ -41,14 +41,17 @@
       margin-bottom: 10px;
     }
 
+    .toolbar-actions,
     .lang-switch {
       display: flex;
       gap: 8px;
       font-size: 13px;
+      flex-wrap: wrap;
     }
 
     .lang-btn,
-    .action-btn {
+    .action-btn,
+    .touch-btn {
       color: #444;
       cursor: pointer;
       user-select: none;
@@ -58,16 +61,19 @@
       background: #fff;
       transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
       font-size: 13px;
+      touch-action: manipulation;
     }
 
     .lang-btn:hover,
-    .action-btn:hover {
+    .action-btn:hover,
+    .touch-btn:hover {
       background: #f0f0f0;
       transform: translateY(-1px);
     }
 
     .lang-btn.active,
-    .action-btn.active {
+    .action-btn.active,
+    .touch-btn.active {
       font-weight: bold;
       color: #fff;
       background: #555;
@@ -198,6 +204,35 @@
       height: auto;
     }
 
+    .touch-controls {
+      display: none;
+      margin: 14px auto 0;
+      width: fit-content;
+      gap: 8px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .touch-row {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .touch-btn {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      font-size: 24px;
+      font-weight: bold;
+      padding: 0;
+    }
+
+    .touch-placeholder {
+      width: 56px;
+      height: 56px;
+    }
+
     .status {
       font-weight: bold;
       min-height: 24px;
@@ -217,13 +252,20 @@
       .top-bar {
         justify-content: center;
       }
+
+      .touch-controls {
+        display: grid;
+      }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="top-bar">
-      <button id="pauseBtn" class="action-btn" type="button"></button>
+      <div class="toolbar-actions">
+        <button id="pauseBtn" class="action-btn" type="button"></button>
+        <button id="restartBtn" class="action-btn" type="button"></button>
+      </div>
       <div class="lang-switch">
         <button id="lang-en" class="lang-btn" type="button">English</button>
         <button id="lang-zh" class="lang-btn" type="button">Traditional Chinese</button>
@@ -254,6 +296,19 @@
       <canvas id="game" width="780" height="420"></canvas>
     </div>
 
+    <div id="touchControls" class="touch-controls" aria-label="Touch controls">
+      <div class="touch-row">
+        <div class="touch-placeholder"></div>
+        <button class="touch-btn" type="button" data-dir="ArrowUp">↑</button>
+        <div class="touch-placeholder"></div>
+      </div>
+      <div class="touch-row">
+        <button class="touch-btn" type="button" data-dir="ArrowLeft">←</button>
+        <button class="touch-btn" type="button" data-dir="ArrowDown">↓</button>
+        <button class="touch-btn" type="button" data-dir="ArrowRight">→</button>
+      </div>
+    </div>
+
     <div id="status" class="status"></div>
   </div>
 
@@ -264,6 +319,7 @@
     const langEnBtn = document.getElementById('lang-en');
     const langZhBtn = document.getElementById('lang-zh');
     const pauseBtn = document.getElementById('pauseBtn');
+    const restartBtn = document.getElementById('restartBtn');
     const invincibleTextEl = document.getElementById('invincibleText');
     const invincibleBarEl = document.getElementById('invincibleBar');
     const invincibleFillEl = document.getElementById('invincibleFill');
@@ -272,6 +328,7 @@
     const hudYellowValueEl = document.getElementById('hudYellowValue');
     const hudBlueValueEl = document.getElementById('hudBlueValue');
     const hudGreenValueEl = document.getElementById('hudGreenValue');
+    const touchButtons = Array.from(document.querySelectorAll('.touch-btn'));
 
     const WIDTH = canvas.width;
     const HEIGHT = canvas.height;
@@ -291,8 +348,10 @@
     const BEST_TIME_STORAGE_KEY = 'red-dot-game-best-time-ms';
 
     let keys = {};
+    let touchKeys = {};
     let gameOver = false;
     let paused = false;
+    let hasStarted = false;
     let animationFrameId = null;
     let lastTime = 0;
     let currentLang = 'en';
@@ -309,7 +368,7 @@
     const I18N = {
       'zh-Hant': {
         TITLE: '紅點清除黃點',
-        CONTROL_HINT: '方向鍵或 WASD 控制紅點移動，P 暫停，R 重新開始',
+        CONTROL_HINT: '方向鍵 / WASD / 觸控按鈕移動，P 暫停，R 重新開始，空白鍵開始',
         LEGEND_RED_LABEL: '● 紅點：',
         LEGEND_RED_TEXT: '玩家控制的點；',
         LEGEND_YELLOW_LABEL: '● 黃點：',
@@ -324,20 +383,24 @@
         HUD_BLUE: '藍點數量',
         HUD_GREEN: '剩餘綠點',
         HUD_BEST_EMPTY: '尚無',
-        STATUS_READY: '按 R 開始新的一局',
+        STATUS_READY: '按開始、空白鍵或 R 開始新的一局',
         STATUS_START: '開始',
         STATUS_WIN: '你贏了！耗時 {TIME}，按 R 再玩一次',
         STATUS_LOSE: '你輸了！按 R 重新開始',
         STATUS_PAUSED: '已暫停，按 P 繼續',
+        STATUS_WAITING: '準備好了嗎？按開始、空白鍵或 R 開始',
         LANG_EN: 'English',
         LANG_ZH: 'Traditional Chinese',
         INVINCIBLE_REMAINING: '無敵 {SECONDS} 秒',
         PAUSE: '暫停',
-        RESUME: '繼續'
+        RESUME: '繼續',
+        RESTART: '重新開始',
+        START: '開始遊戲',
+        TAP_HINT: '手機上可使用下方方向鍵操作'
       },
       en: {
         TITLE: 'Red Dot Clears Yellow Dots',
-        CONTROL_HINT: 'Use arrow keys or WASD to move, P to pause, R to reset',
+        CONTROL_HINT: 'Use arrow keys, WASD, or touch buttons. P to pause, R to reset, Space to start',
         LEGEND_RED_LABEL: '● Red Dot: ',
         LEGEND_RED_TEXT: 'Player-controlled dot;',
         LEGEND_YELLOW_LABEL: '● Yellow Dot: ',
@@ -352,16 +415,20 @@
         HUD_BLUE: 'Blue Dots',
         HUD_GREEN: 'Green Left',
         HUD_BEST_EMPTY: 'None',
-        STATUS_READY: 'Press R to start a new run',
+        STATUS_READY: 'Press Start, Space, or R to begin a new run',
         STATUS_START: 'Go!',
         STATUS_WIN: 'You win! Time: {TIME}. Press R to play again',
         STATUS_LOSE: 'You lose! Press R to restart',
         STATUS_PAUSED: 'Paused. Press P to continue',
+        STATUS_WAITING: 'Ready? Press Start, Space, or R to begin',
         LANG_EN: 'English',
         LANG_ZH: 'Traditional Chinese',
         INVINCIBLE_REMAINING: 'Shield {SECONDS}s',
         PAUSE: 'Pause',
-        RESUME: 'Resume'
+        RESUME: 'Resume',
+        RESTART: 'Restart',
+        START: 'Start Game',
+        TAP_HINT: 'On mobile, use the touch controls below'
       }
     };
 
@@ -428,14 +495,15 @@
       hudGreenValueEl.textContent = String(greens.length);
     }
 
-    function updatePauseButton() {
+    function updateButtons() {
       pauseBtn.textContent = paused ? t('RESUME') : t('PAUSE');
       pauseBtn.classList.toggle('active', paused);
+      restartBtn.textContent = hasStarted ? t('RESTART') : t('START');
     }
 
     function renderTexts() {
       document.getElementById('title').textContent = t('TITLE');
-      document.getElementById('controlHint').textContent = t('CONTROL_HINT');
+      document.getElementById('controlHint').textContent = `${t('CONTROL_HINT')} · ${t('TAP_HINT')}`;
       document.getElementById('legendRedLabel').textContent = t('LEGEND_RED_LABEL');
       document.getElementById('legendRedText').textContent = t('LEGEND_RED_TEXT');
       document.getElementById('legendYellowLabel').textContent = t('LEGEND_YELLOW_LABEL');
@@ -454,7 +522,7 @@
       langEnBtn.classList.toggle('active', currentLang === 'en');
       langZhBtn.classList.toggle('active', currentLang === 'zh-Hant');
       statusEl.textContent = tf(statusKey, statusParams);
-      updatePauseButton();
+      updateButtons();
       updateHUD();
       updateInvincibleUI();
     }
@@ -462,6 +530,7 @@
     function setLanguage(lang) {
       currentLang = lang;
       renderTexts();
+      draw(performance.now());
     }
 
     function updateInvincibleUI(now = performance.now()) {
@@ -538,7 +607,7 @@
       animationFrameId = requestAnimationFrame(loop);
     }
 
-    function resetGame() {
+    function prepareRound() {
       red = {
         x: WIDTH / 2,
         y: HEIGHT / 2,
@@ -549,17 +618,36 @@
       greens = createDots(GREEN_COUNT, GREEN_RADIUS, yellows);
       blues = [];
       keys = {};
+      touchKeys = {};
       gameOver = false;
       paused = false;
+      hasStarted = false;
       lastTime = 0;
       elapsedMs = 0;
+      setStatus('STATUS_WAITING');
+      renderTexts();
+      cancelLoop();
+      draw(performance.now());
+    }
+
+    function startGame() {
+      if (hasStarted && !gameOver && !paused) return;
+      gameOver = false;
+      paused = false;
+      hasStarted = true;
+      lastTime = 0;
       setStatus('STATUS_START');
       renderTexts();
       queueLoop();
     }
 
+    function resetGame() {
+      prepareRound();
+      startGame();
+    }
+
     function togglePause() {
-      if (gameOver) return;
+      if (!hasStarted || gameOver) return;
       paused = !paused;
       if (paused) {
         setStatus('STATUS_PAUSED', {}, 'status paused');
@@ -573,14 +661,18 @@
       }
     }
 
-    function updateRed(dt) {
+    function getInputAxis() {
       let dx = 0;
       let dy = 0;
+      if (keys.ArrowLeft || keys.a || keys.A || touchKeys.ArrowLeft) dx -= 1;
+      if (keys.ArrowRight || keys.d || keys.D || touchKeys.ArrowRight) dx += 1;
+      if (keys.ArrowUp || keys.w || keys.W || touchKeys.ArrowUp) dy -= 1;
+      if (keys.ArrowDown || keys.s || keys.S || touchKeys.ArrowDown) dy += 1;
+      return { dx, dy };
+    }
 
-      if (keys.ArrowLeft || keys.a || keys.A) dx -= 1;
-      if (keys.ArrowRight || keys.d || keys.D) dx += 1;
-      if (keys.ArrowUp || keys.w || keys.W) dy -= 1;
-      if (keys.ArrowDown || keys.s || keys.S) dy += 1;
+    function updateRed(dt) {
+      const { dx, dy } = getInputAxis();
 
       if (dx !== 0 || dy !== 0) {
         const dir = normalize(dx, dy);
@@ -741,14 +833,25 @@
       ctx.globalAlpha = 1;
     }
 
-    function drawPausedOverlay() {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    function drawOverlay(text, buttonText) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 30px Arial';
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.fillRect(WIDTH / 2 - 190, HEIGHT / 2 - 78, 380, 156);
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(WIDTH / 2 - 190, HEIGHT / 2 - 78, 380, 156);
+
+      ctx.fillStyle = '#222';
+      ctx.font = 'bold 28px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(t('STATUS_PAUSED'), WIDTH / 2, HEIGHT / 2);
+      ctx.fillText(text, WIDTH / 2, HEIGHT / 2 - 18);
+
+      ctx.fillStyle = '#444';
+      ctx.font = 'bold 18px Arial';
+      ctx.fillText(buttonText, WIDTH / 2, HEIGHT / 2 + 28);
     }
 
     function draw(now) {
@@ -759,8 +862,11 @@
       drawGreens();
       drawBlues(now);
       drawRed(now);
-      if (paused && !gameOver) {
-        drawPausedOverlay();
+
+      if (!hasStarted && !gameOver) {
+        drawOverlay(t('STATUS_WAITING'), t('START'));
+      } else if (paused && !gameOver) {
+        drawOverlay(t('STATUS_PAUSED'), t('RESUME'));
       }
     }
 
@@ -770,7 +876,7 @@
         return;
       }
 
-      if (paused) {
+      if (paused || !hasStarted) {
         draw(timestamp);
         return;
       }
@@ -788,9 +894,17 @@
       }
       draw(timestamp);
 
-      if (!gameOver && !paused) {
+      if (!gameOver && !paused && hasStarted) {
         animationFrameId = requestAnimationFrame(loop);
       }
+    }
+
+    function setTouchKey(direction, active) {
+      touchKeys[direction] = active;
+    }
+
+    function releaseAllTouchKeys() {
+      touchKeys = {};
     }
 
     function runBasicTests() {
@@ -801,6 +915,9 @@
       console.assert(['en', 'zh-Hant'].includes(detectInitialLanguage()), 'detectInitialLanguage() should return a supported language');
       console.assert(formatSeconds(1534) === '1.5s', 'formatSeconds() should show 1 decimal place');
       console.assert(createDots(5, 8).length === 5, 'createDots() should create requested number of dots under normal conditions');
+      touchKeys = { ArrowLeft: true };
+      console.assert(getInputAxis().dx === -1 && getInputAxis().dy === 0, 'touch controls should feed movement input');
+      releaseAllTouchKeys();
     }
 
     window.addEventListener('keydown', (e) => {
@@ -811,6 +928,10 @@
         'w', 'a', 's', 'd', 'W', 'A', 'S', 'D', ' '
       ].includes(e.key)) {
         e.preventDefault();
+      }
+
+      if (e.key === ' ' && !hasStarted) {
+        startGame();
       }
 
       if (e.key === 'r' || e.key === 'R') {
@@ -826,16 +947,46 @@
       keys[e.key] = false;
     });
 
+    window.addEventListener('blur', () => {
+      keys = {};
+      releaseAllTouchKeys();
+    });
+
+    for (const button of touchButtons) {
+      const direction = button.dataset.dir;
+      const startPress = (event) => {
+        event.preventDefault();
+        if (!hasStarted) startGame();
+        setTouchKey(direction, true);
+        button.classList.add('active');
+      };
+      const endPress = (event) => {
+        if (event) event.preventDefault();
+        setTouchKey(direction, false);
+        button.classList.remove('active');
+      };
+
+      button.addEventListener('pointerdown', startPress);
+      button.addEventListener('pointerup', endPress);
+      button.addEventListener('pointercancel', endPress);
+      button.addEventListener('pointerleave', endPress);
+    }
+
     langEnBtn.addEventListener('click', () => setLanguage('en'));
     langZhBtn.addEventListener('click', () => setLanguage('zh-Hant'));
-    pauseBtn.addEventListener('click', togglePause);
+    pauseBtn.addEventListener('click', () => {
+      if (!hasStarted) {
+        startGame();
+        return;
+      }
+      togglePause();
+    });
+    restartBtn.addEventListener('click', resetGame);
 
     loadBestTime();
     currentLang = detectInitialLanguage();
-    setStatus('STATUS_READY');
-    renderTexts();
+    prepareRound();
     runBasicTests();
-    resetGame();
   </script>
 </body>
 </html>
