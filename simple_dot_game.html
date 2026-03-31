@@ -112,10 +112,10 @@
 
     .hud {
       display: grid;
-      grid-template-columns: repeat(5, minmax(110px, 1fr));
+      grid-template-columns: repeat(6, minmax(110px, 1fr));
       gap: 10px;
       margin: 14px auto 4px;
-      max-width: 780px;
+      max-width: 900px;
     }
 
     .hud-card {
@@ -294,6 +294,7 @@
       <div class="hud-card"><span class="hud-label" id="hudYellowLabel"></span><div class="hud-value" id="hudYellowValue">0</div></div>
       <div class="hud-card"><span class="hud-label" id="hudBlueLabel"></span><div class="hud-value" id="hudBlueValue">0</div></div>
       <div class="hud-card"><span class="hud-label" id="hudGreenLabel"></span><div class="hud-value" id="hudGreenValue">0</div></div>
+      <div class="hud-card"><span class="hud-label" id="hudDangerLabel"></span><div class="hud-value" id="hudDangerValue">Safe</div></div>
     </div>
 
     <div class="game-area">
@@ -337,6 +338,7 @@
     const hudYellowValueEl = document.getElementById('hudYellowValue');
     const hudBlueValueEl = document.getElementById('hudBlueValue');
     const hudGreenValueEl = document.getElementById('hudGreenValue');
+    const hudDangerValueEl = document.getElementById('hudDangerValue');
     const touchButtons = Array.from(document.querySelectorAll('.touch-btn'));
 
     const WIDTH = canvas.width;
@@ -354,6 +356,8 @@
     const RED_INVINCIBLE_MS = 3000;
     const MAX_RED_INVINCIBLE_MS = 20000;
     const MAX_ANGLE_JITTER = Math.PI / 18;
+    const DANGER_WARNING_DISTANCE = 140;
+    const DANGER_HIGH_DISTANCE = 70;
     const BEST_TIME_STORAGE_KEY = 'red-dot-game-best-time-ms';
     const DIFFICULTY_STORAGE_KEY = 'red-dot-game-difficulty';
     const DIFFICULTY_CONFIG = {
@@ -417,6 +421,7 @@
         HUD_YELLOW: '剩餘黃點',
         HUD_BLUE: '藍點數量',
         HUD_GREEN: '剩餘綠點',
+        HUD_DANGER: '危險程度',
         DIFFICULTY_LABEL: '難度',
         DIFFICULTY_EASY: '簡單',
         DIFFICULTY_NORMAL: '普通',
@@ -435,7 +440,10 @@
         RESUME: '繼續',
         RESTART: '重新開始',
         START: '開始遊戲',
-        TAP_HINT: '手機上可使用下方方向鍵操作'
+        TAP_HINT: '手機上可使用下方方向鍵操作',
+        DANGER_SAFE: '安全',
+        DANGER_WARNING: '注意',
+        DANGER_HIGH: '危險'
       },
       en: {
         TITLE: 'Red Dot Clears Yellow Dots',
@@ -453,6 +461,7 @@
         HUD_YELLOW: 'Yellow Left',
         HUD_BLUE: 'Blue Dots',
         HUD_GREEN: 'Green Left',
+        HUD_DANGER: 'Danger',
         DIFFICULTY_LABEL: 'Difficulty',
         DIFFICULTY_EASY: 'Easy',
         DIFFICULTY_NORMAL: 'Normal',
@@ -471,7 +480,10 @@
         RESUME: 'Resume',
         RESTART: 'Restart',
         START: 'Start Game',
-        TAP_HINT: 'On mobile, use the touch controls below'
+        TAP_HINT: 'On mobile, use the touch controls below',
+        DANGER_SAFE: 'Safe',
+        DANGER_WARNING: 'Warning',
+        DANGER_HIGH: 'Danger'
       }
     };
 
@@ -552,12 +564,47 @@
       statusEl.textContent = tf(statusKey, statusParams);
     }
 
-    function updateHUD() {
+    function getDangerState(now = performance.now()) {
+      let nearestDistance = Infinity;
+
+      for (const blue of blues) {
+        if (now < blue.safeUntil) continue;
+        const edgeDistance = Math.max(0, distance(red.x, red.y, blue.x, blue.y) - red.radius - blue.radius);
+        nearestDistance = Math.min(nearestDistance, edgeDistance);
+      }
+
+      if (!Number.isFinite(nearestDistance) || nearestDistance > DANGER_WARNING_DISTANCE) {
+        return { key: 'DANGER_SAFE', distance: nearestDistance, intensity: 0 };
+      }
+
+      if (nearestDistance <= DANGER_HIGH_DISTANCE) {
+        return {
+          key: 'DANGER_HIGH',
+          distance: nearestDistance,
+          intensity: 1 - nearestDistance / DANGER_HIGH_DISTANCE,
+        };
+      }
+
+      return {
+        key: 'DANGER_WARNING',
+        distance: nearestDistance,
+        intensity: 1 - (nearestDistance - DANGER_HIGH_DISTANCE) / (DANGER_WARNING_DISTANCE - DANGER_HIGH_DISTANCE),
+      };
+    }
+
+    function updateHUD(now = performance.now()) {
+      const danger = getDangerState(now);
       hudTimeValueEl.textContent = formatSeconds(elapsedMs);
       hudBestValueEl.textContent = bestTimeMs == null ? t('HUD_BEST_EMPTY') : formatSeconds(bestTimeMs);
       hudYellowValueEl.textContent = String(yellows.length);
       hudBlueValueEl.textContent = String(blues.length);
       hudGreenValueEl.textContent = String(greens.length);
+      hudDangerValueEl.textContent = t(danger.key);
+      hudDangerValueEl.style.color = danger.key === 'DANGER_HIGH'
+        ? '#b30000'
+        : danger.key === 'DANGER_WARNING'
+          ? '#9a6400'
+          : '#0b7a0b';
     }
 
     function updateButtons() {
@@ -591,6 +638,7 @@
       document.getElementById('hudYellowLabel').textContent = t('HUD_YELLOW');
       document.getElementById('hudBlueLabel').textContent = t('HUD_BLUE');
       document.getElementById('hudGreenLabel').textContent = t('HUD_GREEN');
+      document.getElementById('hudDangerLabel').textContent = t('HUD_DANGER');
       langEnBtn.textContent = t('LANG_EN');
       langZhBtn.textContent = t('LANG_ZH');
       langEnBtn.classList.toggle('active', currentLang === 'en');
@@ -911,6 +959,23 @@
       }
     }
 
+    function drawDangerAura(now) {
+      if (!hasStarted || paused || gameOver) return;
+      const danger = getDangerState(now);
+      if (danger.intensity <= 0) return;
+
+      const pulse = 0.65 + 0.35 * (0.5 + Math.sin(now / 120) * 0.5);
+      const radius = red.radius + 18 + danger.intensity * 28;
+      const alpha = Math.min(0.36, 0.08 + danger.intensity * 0.28) * pulse;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(red.x, red.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(220, 0, 0, ${alpha.toFixed(3)})`;
+      ctx.fill();
+      ctx.restore();
+    }
+
     function drawRed(now) {
       const remaining = red.safeUntil - now;
       const safe = remaining > 0;
@@ -985,6 +1050,7 @@
       drawGreens();
       drawBlues(now);
       drawMoveTarget();
+      drawDangerAura(now);
       drawRed(now);
 
       if (!hasStarted && !gameOver) {
@@ -1072,6 +1138,11 @@
       clearMoveTarget();
       console.assert(getBestTimeStorageKey().endsWith(currentDifficulty), 'best time storage key should include the current difficulty');
       console.assert(DIFFICULTY_CONFIG.easy.yellowCount < DIFFICULTY_CONFIG.hard.yellowCount, 'difficulty presets should differ');
+      blues = [{ x: red.x + red.radius + BLUE_RADIUS + 20, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
+      console.assert(getDangerState(0).key === 'DANGER_HIGH', 'getDangerState() should flag nearby active blue dots as dangerous');
+      blues = [{ x: red.x + red.radius + BLUE_RADIUS + 220, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
+      console.assert(getDangerState(0).key === 'DANGER_SAFE', 'getDangerState() should report safe when hazards are far away');
+      blues = [];
     }
 
     window.addEventListener('keydown', (e) => {
