@@ -291,6 +291,7 @@
       </div>
       <div class="audio-switch">
         <button id="audioToggleBtn" class="action-btn" type="button">Sound: On</button>
+        <button id="motionToggleBtn" class="action-btn" type="button">Motion: Full</button>
       </div>
       <div class="lang-switch">
         <button id="lang-en" class="lang-btn" type="button">English</button>
@@ -322,6 +323,7 @@
       <div class="hud-card"><span class="hud-label" id="hudDangerLabel"></span><div class="hud-value" id="hudDangerValue">Safe</div></div>
       <div class="hud-card"><span class="hud-label" id="hudSlowLabel"></span><div class="hud-value" id="hudSlowValue">Ready</div></div>
       <div class="hud-card"><span class="hud-label" id="hudMagnetLabel"></span><div class="hud-value" id="hudMagnetValue">Ready</div></div>
+      <div class="hud-card"><span class="hud-label" id="hudProgressLabel"></span><div class="hud-value" id="hudProgressValue">0%</div></div>
     </div>
 
     <div class="game-area">
@@ -364,6 +366,7 @@
     const fullscreenBtn = document.getElementById('fullscreenBtn');
     const audioToggleBtn = document.getElementById('audioToggleBtn');
     const invincibleTextEl = document.getElementById('invincibleText');
+    const motionToggleBtn = document.getElementById('motionToggleBtn');
     const invincibleBarEl = document.getElementById('invincibleBar');
     const invincibleFillEl = document.getElementById('invincibleFill');
     const hudTimeValueEl = document.getElementById('hudTimeValue');
@@ -376,6 +379,7 @@
     const hudDangerValueEl = document.getElementById('hudDangerValue');
     const hudSlowValueEl = document.getElementById('hudSlowValue');
     const hudMagnetValueEl = document.getElementById('hudMagnetValue');
+    const hudProgressValueEl = document.getElementById('hudProgressValue');
     const threatAnnouncerEl = document.getElementById('threatAnnouncer');
     const touchButtons = Array.from(document.querySelectorAll('.touch-btn[data-dir]'));
     const dashBtn = document.getElementById('dashBtn');
@@ -418,6 +422,7 @@
     const BEST_TIME_STORAGE_KEY = 'red-dot-game-best-time-ms';
     const DIFFICULTY_STORAGE_KEY = 'red-dot-game-difficulty';
     const SOUND_STORAGE_KEY = 'red-dot-game-sound-enabled';
+    const MOTION_STORAGE_KEY = 'red-dot-game-reduced-motion';
     const FULLSCREEN_TARGET = document.documentElement;
     const DIFFICULTY_CONFIG = {
       easy: {
@@ -468,6 +473,7 @@
     let currentDifficulty = 'normal';
     let soundEnabled = true;
     let audioContext = null;
+    let reducedMotion = false;
     let lastRunSummary = null;
     let lastThreatAnnouncement = '';
     let dashQueued = false;
@@ -522,6 +528,7 @@
         HUD_MAGNET: '磁吸場',
         HUD_MAGNET_READY: '就緒',
         HUD_MAGNET_ACTIVE: '吸附中',
+        HUD_PROGRESS: '清除進度',
         DIFFICULTY_LABEL: '難度',
         DIFFICULTY_EASY: '簡單',
         DIFFICULTY_NORMAL: '普通',
@@ -548,6 +555,8 @@
         PAUSE: '暫停',
         SOUND_ON: '音效：開',
         SOUND_OFF: '音效：關',
+        MOTION_FULL: '動態：完整',
+        MOTION_REDUCED: '動態：簡化',
         RESUME: '繼續',
         RESTART: '重新開始',
         START: '開始遊戲',
@@ -605,6 +614,7 @@
         HUD_MAGNET: 'Magnet',
         HUD_MAGNET_READY: 'Ready',
         HUD_MAGNET_ACTIVE: 'Active',
+        HUD_PROGRESS: 'Progress',
         DIFFICULTY_LABEL: 'Difficulty',
         DIFFICULTY_EASY: 'Easy',
         DIFFICULTY_NORMAL: 'Normal',
@@ -631,6 +641,8 @@
         PAUSE: 'Pause',
         SOUND_ON: 'Sound: On',
         SOUND_OFF: 'Sound: Off',
+        MOTION_FULL: 'Motion: Full',
+        MOTION_REDUCED: 'Motion: Reduced',
         RESUME: 'Resume',
         RESTART: 'Restart',
         START: 'Start Game',
@@ -739,6 +751,28 @@
     function saveSoundPreference() {
       try {
         localStorage.setItem(SOUND_STORAGE_KEY, String(soundEnabled));
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+
+    function loadMotionPreference() {
+      try {
+        const stored = localStorage.getItem(MOTION_STORAGE_KEY);
+        if (stored == null) {
+          reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        } else {
+          reducedMotion = stored === 'true';
+        }
+      } catch {
+        reducedMotion = false;
+      }
+    }
+
+    function saveMotionPreference() {
+      try {
+        localStorage.setItem(MOTION_STORAGE_KEY, String(reducedMotion));
       } catch {
         // ignore storage errors
       }
@@ -963,6 +997,9 @@
         ? `${t('HUD_MAGNET_ACTIVE')} ${(magnetRemaining / 1000).toFixed(1)}s`
         : t('HUD_MAGNET_READY');
       hudMagnetValueEl.style.color = magnetRemaining > 0 ? '#00879a' : '#666';
+      const progress = initialYellowCount > 0 ? ((initialYellowCount - yellows.length) / initialYellowCount) * 100 : 0;
+      hudProgressValueEl.textContent = `${Math.round(progress)}%`;
+      hudProgressValueEl.style.color = progress >= 100 ? '#0b7a0b' : progress >= 60 ? '#9a6400' : '#444';
     }
 
     function updateButtons() {
@@ -975,6 +1012,8 @@
       fullscreenBtn.classList.toggle('active', isFullscreenActive());
       audioToggleBtn.textContent = soundEnabled ? t('SOUND_ON') : t('SOUND_OFF');
       audioToggleBtn.classList.toggle('active', soundEnabled);
+      motionToggleBtn.textContent = reducedMotion ? t('MOTION_REDUCED') : t('MOTION_FULL');
+      motionToggleBtn.classList.toggle('active', reducedMotion);
       difficultyEasyBtn.textContent = t('DIFFICULTY_EASY');
       difficultyNormalBtn.textContent = t('DIFFICULTY_NORMAL');
       difficultyHardBtn.textContent = t('DIFFICULTY_HARD');
@@ -1013,6 +1052,7 @@
       document.getElementById('hudDangerLabel').textContent = t('HUD_DANGER');
       document.getElementById('hudSlowLabel').textContent = t('HUD_SLOW');
       document.getElementById('hudMagnetLabel').textContent = t('HUD_MAGNET');
+      document.getElementById('hudProgressLabel').textContent = t('HUD_PROGRESS');
       langEnBtn.textContent = t('LANG_EN');
       langZhBtn.textContent = t('LANG_ZH');
       langEnBtn.classList.toggle('active', currentLang === 'en');
@@ -1523,7 +1563,7 @@
       const slowActive = now < slowUntil;
       for (const orange of oranges) {
         ctx.save();
-        const pulse = 0.72 + Math.sin(now / 160 + orange.x * 0.012) * 0.14;
+        const pulse = reducedMotion ? 0.86 : 0.72 + Math.sin(now / 160 + orange.x * 0.012) * 0.14;
         ctx.beginPath();
         ctx.arc(orange.x, orange.y, orange.radius + 5, 0, Math.PI * 2);
         ctx.fillStyle = slowActive ? 'rgba(255, 122, 0, 0.16)' : 'rgba(255, 122, 0, 0.08)';
@@ -1540,7 +1580,7 @@
       const magnetActive = now < magnetUntil;
       for (const cyan of cyans) {
         ctx.save();
-        const pulse = 0.74 + Math.sin(now / 150 + cyan.x * 0.014) * 0.14;
+        const pulse = reducedMotion ? 0.86 : 0.74 + Math.sin(now / 150 + cyan.x * 0.014) * 0.14;
         ctx.beginPath();
         ctx.arc(cyan.x, cyan.y, cyan.radius + 6, 0, Math.PI * 2);
         ctx.fillStyle = magnetActive ? 'rgba(0, 188, 212, 0.16)' : 'rgba(0, 188, 212, 0.08)';
@@ -1557,7 +1597,7 @@
       const freezeActive = now < freezeUntil;
       for (const p of purples) {
         ctx.save();
-        const pulse = 0.75 + Math.sin(now / 140 + p.x * 0.01) * 0.15;
+        const pulse = reducedMotion ? 0.86 : 0.75 + Math.sin(now / 140 + p.x * 0.01) * 0.15;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius + 5, 0, Math.PI * 2);
         ctx.fillStyle = freezeActive ? 'rgba(122, 60, 255, 0.14)' : 'rgba(122, 60, 255, 0.08)';
@@ -1574,7 +1614,7 @@
       const freezeActive = now < freezeUntil;
       for (const blue of blues) {
         const safe = now < blue.safeUntil;
-        ctx.globalAlpha = safe && Math.floor(now / 180) % 2 === 0 ? 0.25 : 1;
+        ctx.globalAlpha = safe && !reducedMotion && Math.floor(now / 180) % 2 === 0 ? 0.25 : 1;
         ctx.beginPath();
         ctx.arc(blue.x, blue.y, blue.radius, 0, Math.PI * 2);
         ctx.fillStyle = freezeActive ? '#72b6ff' : '#1e66ff';
@@ -1594,15 +1634,15 @@
       const target = getNearestYellow();
       if (!target) return;
 
-      const pulse = 0.6 + (Math.sin(now / 170) + 1) * 0.2;
+      const pulse = reducedMotion ? 0.75 : 0.6 + (Math.sin(now / 170) + 1) * 0.2;
       const progress = initialYellowCount > 0
         ? 1 - yellows.length / initialYellowCount
         : 0;
       const lineAlpha = 0.14 + progress * 0.18;
 
       ctx.save();
-      ctx.setLineDash([6, 7]);
-      ctx.lineDashOffset = -(now / 42);
+      ctx.setLineDash(reducedMotion ? [] : [6, 7]);
+      ctx.lineDashOffset = reducedMotion ? 0 : -(now / 42);
       ctx.strokeStyle = `rgba(212, 170, 0, ${lineAlpha.toFixed(3)})`;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -1630,7 +1670,7 @@
       const danger = getDangerState(now);
       if (danger.intensity <= 0) return;
 
-      const pulse = 0.65 + 0.35 * (0.5 + Math.sin(now / 120) * 0.5);
+      const pulse = reducedMotion ? 0.82 : 0.65 + 0.35 * (0.5 + Math.sin(now / 120) * 0.5);
       const radius = red.radius + 18 + danger.intensity * 28;
       const alpha = Math.min(0.36, 0.08 + danger.intensity * 0.28) * pulse;
 
@@ -1709,7 +1749,7 @@
       }
 
       if (dashing) {
-        const dashPulse = 0.6 + (Math.sin(now / 65) + 1) * 0.16;
+        const dashPulse = reducedMotion ? 0.78 : 0.6 + (Math.sin(now / 65) + 1) * 0.16;
         const dashVector = red.dashVector || { x: 0, y: 0 };
         ctx.save();
         ctx.strokeStyle = `rgba(122, 60, 255, ${(0.35 + dashPulse * 0.2).toFixed(3)})`;
@@ -1727,7 +1767,7 @@
       }
 
       if (comboActive) {
-        const comboPulse = 0.7 + (Math.sin(now / 95) + 1) * 0.18;
+        const comboPulse = reducedMotion ? 0.8 : 0.7 + (Math.sin(now / 95) + 1) * 0.18;
         ctx.save();
         ctx.beginPath();
         ctx.arc(red.x, red.y, red.radius + 8 + comboCount * 0.8, 0, Math.PI * 2);
@@ -1741,7 +1781,7 @@
         ctx.restore();
       }
 
-      ctx.globalAlpha = safe && Math.floor(now / blinkInterval) % 2 === 0 ? 0.3 : 1;
+      ctx.globalAlpha = safe && !reducedMotion && Math.floor(now / blinkInterval) % 2 === 0 ? 0.3 : 1;
       if (dashing) ctx.globalAlpha = Math.max(ctx.globalAlpha, 0.92);
       ctx.beginPath();
       ctx.arc(red.x, red.y, red.radius, 0, Math.PI * 2);
@@ -1776,7 +1816,7 @@
       ctx.arc(red.x, red.y, CYAN_MAGNET_RANGE, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(0, 145, 170, 0.5)';
       ctx.lineWidth = 2;
-      ctx.setLineDash([10, 8]);
+      ctx.setLineDash(reducedMotion ? [] : [10, 8]);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = '#006b78';
@@ -2001,6 +2041,7 @@
         moveTarget: moveTarget ? { ...moveTarget } : null,
         currentDifficulty,
         soundEnabled,
+        reducedMotion,
         dashQueued,
         lastRunSummary: lastRunSummary ? { ...lastRunSummary } : null,
         red: red ? { ...red, dashVector: red.dashVector ? { ...red.dashVector } : undefined } : null,
@@ -2047,9 +2088,12 @@
         console.assert(getBestTimeStorageKey().endsWith(currentDifficulty), 'best time storage key should include the current difficulty');
         soundEnabled = true;
         console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound toggle labels should exist');
+        reducedMotion = true;
+        console.assert(t(reducedMotion ? 'MOTION_REDUCED' : 'MOTION_FULL').length > 0, 'motion toggle labels should exist');
         soundEnabled = false;
         console.assert(t(soundEnabled ? 'SOUND_ON' : 'SOUND_OFF').length > 0, 'sound off label should exist');
         soundEnabled = true;
+        reducedMotion = false;
         console.assert(DIFFICULTY_CONFIG.easy.yellowCount < DIFFICULTY_CONFIG.hard.yellowCount, 'difficulty presets should differ');
         console.assert(typeof isFullscreenSupported() === 'boolean', 'isFullscreenSupported() should return a boolean');
         console.assert([t('FULLSCREEN_ENTER'), t('FULLSCREEN_EXIT')].every((label) => label.length > 0), 'fullscreen button labels should exist');
@@ -2133,6 +2177,7 @@
         moveTarget = originalState.moveTarget ? { ...originalState.moveTarget } : null;
         currentDifficulty = originalState.currentDifficulty;
         soundEnabled = originalState.soundEnabled;
+        reducedMotion = originalState.reducedMotion;
         dashQueued = originalState.dashQueued;
         lastRunSummary = originalState.lastRunSummary ? { ...originalState.lastRunSummary } : null;
         red = originalState.red ? { ...originalState.red, dashVector: originalState.red.dashVector ? { ...originalState.red.dashVector } : undefined } : null;
@@ -2150,9 +2195,9 @@
         maxCombo = originalState.maxCombo;
         comboExpiresAt = originalState.comboExpiresAt;
         lastYellowPickupAt = originalState.lastYellowPickupAt;
-        updateButtons();
-        updateHUD();
-        updateInvincibleUI();
+        setStatus(statusKey, statusParams, originalState.gameOver ? 'status lose' : originalState.paused ? 'status paused' : 'status');
+        renderTexts();
+        draw(performance.now());
       }
     }
 
@@ -2262,6 +2307,12 @@
       }
       renderTexts();
     });
+    motionToggleBtn.addEventListener('click', () => {
+      reducedMotion = !reducedMotion;
+      saveMotionPreference();
+      renderTexts();
+      draw(performance.now());
+    });
     pauseBtn.addEventListener('click', () => {
       if (!hasStarted) {
         startGame();
@@ -2282,6 +2333,7 @@
     loadDifficulty();
     loadBestTime();
     loadSoundPreference();
+    loadMotionPreference();
     currentLang = detectInitialLanguage();
     prepareRound();
     runBasicTests();
