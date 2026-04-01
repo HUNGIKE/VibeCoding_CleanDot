@@ -111,6 +111,7 @@
     .dot-blue { color: #1e66ff; }
     .dot-green { color: #00aa38; }
     .dot-purple { color: #7a3cff; }
+    .dot-orange { color: #ff7a00; }
 
     .hud {
       display: grid;
@@ -305,6 +306,7 @@
       <p class="hint"><span class="dot-label dot-blue" id="legendBlueLabel"></span><span id="legendBlueText"></span></p>
       <p class="hint"><span class="dot-label dot-green" id="legendGreenLabel"></span><span id="legendGreenText"></span></p>
       <p class="hint"><span class="dot-label dot-purple" id="legendPurpleLabel"></span><span id="legendPurpleText"></span></p>
+      <p class="hint"><span class="dot-label dot-orange" id="legendOrangeLabel"></span><span id="legendOrangeText"></span></p>
     </div>
 
     <div class="hud">
@@ -316,6 +318,7 @@
       <div class="hud-card"><span class="hud-label" id="hudComboLabel"></span><div class="hud-value" id="hudComboValue">x1</div></div>
       <div class="hud-card"><span class="hud-label" id="hudDashLabel"></span><div class="hud-value" id="hudDashValue">Ready</div></div>
       <div class="hud-card"><span class="hud-label" id="hudDangerLabel"></span><div class="hud-value" id="hudDangerValue">Safe</div></div>
+      <div class="hud-card"><span class="hud-label" id="hudSlowLabel"></span><div class="hud-value" id="hudSlowValue">Ready</div></div>
     </div>
 
     <div class="game-area">
@@ -368,6 +371,7 @@
     const hudComboValueEl = document.getElementById('hudComboValue');
     const hudDashValueEl = document.getElementById('hudDashValue');
     const hudDangerValueEl = document.getElementById('hudDangerValue');
+    const hudSlowValueEl = document.getElementById('hudSlowValue');
     const threatAnnouncerEl = document.getElementById('threatAnnouncer');
     const touchButtons = Array.from(document.querySelectorAll('.touch-btn[data-dir]'));
     const dashBtn = document.getElementById('dashBtn');
@@ -380,14 +384,18 @@
     const BLUE_RADIUS = 8;
     const GREEN_RADIUS = 8;
     const PURPLE_RADIUS = 9;
+    const ORANGE_RADIUS = 9;
     const RED_SPEED = 210;
     const BLUE_SPEED = 170;
     const YELLOW_COUNT = 50;
     const GREEN_COUNT = 10;
     const PURPLE_COUNT = 4;
+    const ORANGE_COUNT = 3;
     const NEW_BLUE_SAFE_MS = 3000;
     const RED_INVINCIBLE_MS = 3000;
     const PURPLE_FREEZE_MS = 3500;
+    const ORANGE_SLOW_MS = 4000;
+    const ORANGE_SLOW_FACTOR = 0.45;
     const MAX_RED_INVINCIBLE_MS = 20000;
     const COMBO_WINDOW_MS = 1500;
     const COMBO_SPEED_STEP = 0.035;
@@ -409,6 +417,7 @@
         yellowCount: 38,
         greenCount: 12,
         purpleCount: 5,
+        orangeCount: 4,
         newBlueSafeMs: 3600,
       },
       normal: {
@@ -417,6 +426,7 @@
         yellowCount: YELLOW_COUNT,
         greenCount: GREEN_COUNT,
         purpleCount: PURPLE_COUNT,
+        orangeCount: ORANGE_COUNT,
         newBlueSafeMs: NEW_BLUE_SAFE_MS,
       },
       hard: {
@@ -425,6 +435,7 @@
         yellowCount: 62,
         greenCount: 8,
         purpleCount: 3,
+        orangeCount: 2,
         newBlueSafeMs: 2200,
       }
     };
@@ -454,7 +465,9 @@
     let blues = [];
     let greens = [];
     let purples = [];
+    let oranges = [];
     let freezeUntil = 0;
+    let slowUntil = 0;
     let initialYellowCount = 0;
     let comboCount = 0;
     let maxCombo = 0;
@@ -475,6 +488,8 @@
         LEGEND_GREEN_TEXT: '碰到後紅點獲得 3 秒不受影響狀態（最多累加至 20 秒）',
         LEGEND_PURPLE_LABEL: '● 紫點：',
         LEGEND_PURPLE_TEXT: '碰到後讓所有藍點凍結 3.5 秒，方便脫困或轉向',
+        LEGEND_ORANGE_LABEL: '● 橘點：',
+        LEGEND_ORANGE_TEXT: '碰到後讓所有藍點暫時減速 4 秒，適合整理局面',
         HUD_TIME: '目前時間',
         HUD_BEST: '最佳成績',
         HUD_YELLOW: '剩餘黃點',
@@ -485,6 +500,9 @@
         HUD_DASH_READY: '可用',
         HUD_DASH_ACTIVE: '衝刺中',
         HUD_DANGER: '危險程度',
+        HUD_SLOW: '緩速場',
+        HUD_SLOW_READY: '就緒',
+        HUD_SLOW_ACTIVE: '緩速中',
         DIFFICULTY_LABEL: '難度',
         DIFFICULTY_EASY: '簡單',
         DIFFICULTY_NORMAL: '普通',
@@ -521,6 +539,7 @@
         DANGER_WARNING: '注意',
         DANGER_HIGH: '危險',
         FREEZE_REMAINING: '凍結 {SECONDS} 秒',
+        SLOW_REMAINING: '緩速 {SECONDS} 秒',
         THREAT_LEFT: '左方',
         THREAT_RIGHT: '右方',
         THREAT_UP: '上方',
@@ -546,6 +565,8 @@
         LEGEND_GREEN_TEXT: 'Gain 3 seconds of invulnerability (stack up to 20 seconds)',
         LEGEND_PURPLE_LABEL: '● Purple Dot: ',
         LEGEND_PURPLE_TEXT: 'Freeze every blue hazard for 3.5 seconds to escape tight spots',
+        LEGEND_ORANGE_LABEL: '● Orange Dot: ',
+        LEGEND_ORANGE_TEXT: 'Slow every blue hazard for 4 seconds to steady the arena',
         HUD_TIME: 'Current Time',
         HUD_BEST: 'Best Time',
         HUD_YELLOW: 'Yellow Left',
@@ -556,6 +577,9 @@
         HUD_DASH_READY: 'Ready',
         HUD_DASH_ACTIVE: 'Dashing',
         HUD_DANGER: 'Danger',
+        HUD_SLOW: 'Slow Field',
+        HUD_SLOW_READY: 'Ready',
+        HUD_SLOW_ACTIVE: 'Active',
         DIFFICULTY_LABEL: 'Difficulty',
         DIFFICULTY_EASY: 'Easy',
         DIFFICULTY_NORMAL: 'Normal',
@@ -592,6 +616,7 @@
         DANGER_WARNING: 'Warning',
         DANGER_HIGH: 'Danger',
         FREEZE_REMAINING: 'Freeze {SECONDS}s',
+        SLOW_REMAINING: 'Slow {SECONDS}s',
         THREAT_LEFT: 'left',
         THREAT_RIGHT: 'right',
         THREAT_UP: 'up',
@@ -881,6 +906,7 @@
     function updateHUD(now = performance.now()) {
       const danger = getDangerState(now);
       const comboActive = comboCount > 1 && now < comboExpiresAt;
+      const slowRemaining = Math.max(0, slowUntil - now);
       hudTimeValueEl.textContent = formatSeconds(elapsedMs);
       hudBestValueEl.textContent = bestTimeMs == null ? t('HUD_BEST_EMPTY') : formatSeconds(bestTimeMs);
       hudYellowValueEl.textContent = String(yellows.length);
@@ -902,6 +928,10 @@
         : danger.key === 'DANGER_WARNING'
           ? '#9a6400'
           : '#0b7a0b';
+      hudSlowValueEl.textContent = slowRemaining > 0
+        ? `${t('HUD_SLOW_ACTIVE')} ${(slowRemaining / 1000).toFixed(1)}s`
+        : t('HUD_SLOW_READY');
+      hudSlowValueEl.style.color = slowRemaining > 0 ? '#c65f00' : '#666';
     }
 
     function updateButtons() {
@@ -938,6 +968,8 @@
       document.getElementById('legendGreenText').textContent = t('LEGEND_GREEN_TEXT');
       document.getElementById('legendPurpleLabel').textContent = t('LEGEND_PURPLE_LABEL');
       document.getElementById('legendPurpleText').textContent = t('LEGEND_PURPLE_TEXT');
+      document.getElementById('legendOrangeLabel').textContent = t('LEGEND_ORANGE_LABEL');
+      document.getElementById('legendOrangeText').textContent = t('LEGEND_ORANGE_TEXT');
       document.getElementById('hudTimeLabel').textContent = t('HUD_TIME');
       document.getElementById('hudBestLabel').textContent = t('HUD_BEST');
       document.getElementById('hudYellowLabel').textContent = t('HUD_YELLOW');
@@ -946,6 +978,7 @@
       document.getElementById('hudComboLabel').textContent = t('HUD_COMBO');
       document.getElementById('hudDashLabel').textContent = t('HUD_DASH');
       document.getElementById('hudDangerLabel').textContent = t('HUD_DANGER');
+      document.getElementById('hudSlowLabel').textContent = t('HUD_SLOW');
       langEnBtn.textContent = t('LANG_EN');
       langZhBtn.textContent = t('LANG_ZH');
       langEnBtn.classList.toggle('active', currentLang === 'en');
@@ -1096,8 +1129,10 @@
       initialYellowCount = yellows.length;
       greens = createDots(config.greenCount, GREEN_RADIUS, yellows);
       purples = createDots(config.purpleCount, PURPLE_RADIUS, [...yellows, ...greens]);
+      oranges = createDots(config.orangeCount, ORANGE_RADIUS, [...yellows, ...greens, ...purples]);
       blues = [];
       freezeUntil = 0;
+      slowUntil = 0;
       keys = {};
       touchKeys = {};
       gameOver = false;
@@ -1333,6 +1368,18 @@
       }
     }
 
+    function updateOrangeCollisions(now) {
+      for (let i = oranges.length - 1; i >= 0; i -= 1) {
+        const orange = oranges[i];
+        if (distance(red.x, red.y, orange.x, orange.y) <= red.radius + orange.radius) {
+          slowUntil = Math.max(slowUntil, now) + ORANGE_SLOW_MS;
+          playSound('powerup');
+          oranges.splice(i, 1);
+          updateHUD(now);
+        }
+      }
+    }
+
     function bounceBlue(blue, flipX, flipY) {
       const nextVx = flipX ? -blue.vx : blue.vx;
       const nextVy = flipY ? -blue.vy : blue.vy;
@@ -1344,11 +1391,13 @@
     function updateBlues(dt, now) {
       const redSafe = now < red.safeUntil;
       const freezeActive = now < freezeUntil;
+      const slowActive = now < slowUntil;
+      const speedScale = slowActive ? ORANGE_SLOW_FACTOR : 1;
 
       for (const blue of blues) {
         if (!freezeActive) {
-          blue.x += blue.vx * dt;
-          blue.y += blue.vy * dt;
+          blue.x += blue.vx * dt * speedScale;
+          blue.y += blue.vy * dt * speedScale;
         }
 
         if (blue.x - blue.radius <= 0) {
@@ -1402,6 +1451,23 @@
         ctx.arc(g.x, g.y, g.radius, 0, Math.PI * 2);
         ctx.fillStyle = '#00cc44';
         ctx.fill();
+      }
+    }
+
+    function drawOranges(now) {
+      const slowActive = now < slowUntil;
+      for (const orange of oranges) {
+        ctx.save();
+        const pulse = 0.72 + Math.sin(now / 160 + orange.x * 0.012) * 0.14;
+        ctx.beginPath();
+        ctx.arc(orange.x, orange.y, orange.radius + 5, 0, Math.PI * 2);
+        ctx.fillStyle = slowActive ? 'rgba(255, 122, 0, 0.16)' : 'rgba(255, 122, 0, 0.08)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(orange.x, orange.y, orange.radius * pulse, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff7a00';
+        ctx.fill();
+        ctx.restore();
       }
     }
 
@@ -1617,6 +1683,21 @@
       ctx.restore();
     }
 
+    function drawSlowOverlay(now) {
+      if (now >= slowUntil || !hasStarted || paused || gameOver) return;
+      const remainingMs = slowUntil - now;
+      const alpha = Math.min(0.1, 0.04 + (remainingMs / ORANGE_SLOW_MS) * 0.06);
+      ctx.save();
+      ctx.fillStyle = `rgba(255, 180, 80, ${alpha.toFixed(3)})`;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      ctx.fillStyle = '#8a4200';
+      ctx.font = 'bold 18px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(tf('SLOW_REMAINING', { SECONDS: (remainingMs / 1000).toFixed(1) }), WIDTH / 2, 38);
+      ctx.restore();
+    }
+
     function drawMoveTarget() {
       if (!moveTarget || !hasStarted || paused || gameOver) return;
 
@@ -1716,11 +1797,13 @@
       ctx.clearRect(0, 0, WIDTH, HEIGHT);
       drawYellows();
       drawGreens();
+      drawOranges(now);
       drawPurples(now);
       drawBlues(now);
       drawNearestYellowGuide(now);
       drawMoveTarget();
       drawFreezeOverlay(now);
+      drawSlowOverlay(now);
       drawDangerAura(now);
       drawNearestThreatIndicator(now);
       drawRed(now);
@@ -1756,6 +1839,7 @@
       if (!gameOver) {
         updateGreenCollisions(timestamp);
         updatePurpleCollisions(timestamp);
+        updateOrangeCollisions(timestamp);
         updateBlues(dt, timestamp);
       }
       draw(timestamp);
@@ -1816,7 +1900,9 @@
         blues: blues.map((item) => ({ ...item })),
         greens: greens.map((item) => ({ ...item })),
         purples: purples.map((item) => ({ ...item })),
+        oranges: oranges.map((item) => ({ ...item })),
         freezeUntil,
+        slowUntil,
         initialYellowCount,
         comboCount,
         maxCombo,
@@ -1880,6 +1966,14 @@
         updateBlues(1, 1001);
         console.assert(blues[0].x === 120, 'frozen blue dots should not move while freeze is active');
         freezeUntil = 0;
+        oranges = [{ x: red.x, y: red.y, radius: ORANGE_RADIUS }];
+        slowUntil = 0;
+        updateOrangeCollisions(2000);
+        console.assert(slowUntil === 2000 + ORANGE_SLOW_MS, 'orange pickup should start a slow timer');
+        blues = [{ x: 120, y: 100, radius: BLUE_RADIUS, vx: 100, vy: 0, safeUntil: 0 }];
+        updateBlues(1, 2001);
+        console.assert(Math.abs(blues[0].x - (120 + 100 * ORANGE_SLOW_FACTOR)) < 1e-9, 'slow field should reduce blue movement speed');
+        slowUntil = 0;
         blues = [{ x: red.x + red.radius + BLUE_RADIUS + 20, y: red.y, radius: BLUE_RADIUS, vx: 0, vy: 0, safeUntil: 0 }];
         console.assert(getDangerState(0).key === 'DANGER_HIGH', 'getDangerState() should flag nearby active blue dots as dangerous');
         const threat = getNearestBlueThreat(0);
@@ -1929,7 +2023,9 @@
         blues = originalState.blues.map((item) => ({ ...item }));
         greens = originalState.greens.map((item) => ({ ...item }));
         purples = originalState.purples.map((item) => ({ ...item }));
+        oranges = originalState.oranges.map((item) => ({ ...item }));
         freezeUntil = originalState.freezeUntil;
+        slowUntil = originalState.slowUntil;
         initialYellowCount = originalState.initialYellowCount;
         comboCount = originalState.comboCount;
         maxCombo = originalState.maxCombo;
