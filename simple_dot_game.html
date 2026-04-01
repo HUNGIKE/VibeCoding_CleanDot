@@ -112,6 +112,7 @@
     .dot-green { color: #00aa38; }
     .dot-purple { color: #7a3cff; }
     .dot-orange { color: #ff7a00; }
+    .dot-cyan { color: #00bcd4; }
 
     .hud {
       display: grid;
@@ -307,6 +308,7 @@
       <p class="hint"><span class="dot-label dot-green" id="legendGreenLabel"></span><span id="legendGreenText"></span></p>
       <p class="hint"><span class="dot-label dot-purple" id="legendPurpleLabel"></span><span id="legendPurpleText"></span></p>
       <p class="hint"><span class="dot-label dot-orange" id="legendOrangeLabel"></span><span id="legendOrangeText"></span></p>
+      <p class="hint"><span class="dot-label dot-cyan" id="legendCyanLabel"></span><span id="legendCyanText"></span></p>
     </div>
 
     <div class="hud">
@@ -319,6 +321,7 @@
       <div class="hud-card"><span class="hud-label" id="hudDashLabel"></span><div class="hud-value" id="hudDashValue">Ready</div></div>
       <div class="hud-card"><span class="hud-label" id="hudDangerLabel"></span><div class="hud-value" id="hudDangerValue">Safe</div></div>
       <div class="hud-card"><span class="hud-label" id="hudSlowLabel"></span><div class="hud-value" id="hudSlowValue">Ready</div></div>
+      <div class="hud-card"><span class="hud-label" id="hudMagnetLabel"></span><div class="hud-value" id="hudMagnetValue">Ready</div></div>
     </div>
 
     <div class="game-area">
@@ -372,6 +375,7 @@
     const hudDashValueEl = document.getElementById('hudDashValue');
     const hudDangerValueEl = document.getElementById('hudDangerValue');
     const hudSlowValueEl = document.getElementById('hudSlowValue');
+    const hudMagnetValueEl = document.getElementById('hudMagnetValue');
     const threatAnnouncerEl = document.getElementById('threatAnnouncer');
     const touchButtons = Array.from(document.querySelectorAll('.touch-btn[data-dir]'));
     const dashBtn = document.getElementById('dashBtn');
@@ -391,11 +395,16 @@
     const GREEN_COUNT = 10;
     const PURPLE_COUNT = 4;
     const ORANGE_COUNT = 3;
+    const CYAN_COUNT = 3;
     const NEW_BLUE_SAFE_MS = 3000;
     const RED_INVINCIBLE_MS = 3000;
     const PURPLE_FREEZE_MS = 3500;
     const ORANGE_SLOW_MS = 4000;
     const ORANGE_SLOW_FACTOR = 0.45;
+    const CYAN_RADIUS = 9;
+    const CYAN_MAGNET_MS = 4500;
+    const CYAN_MAGNET_RANGE = 150;
+    const CYAN_MAGNET_SPEED = 130;
     const MAX_RED_INVINCIBLE_MS = 20000;
     const COMBO_WINDOW_MS = 1500;
     const COMBO_SPEED_STEP = 0.035;
@@ -418,6 +427,7 @@
         greenCount: 12,
         purpleCount: 5,
         orangeCount: 4,
+        cyanCount: 4,
         newBlueSafeMs: 3600,
       },
       normal: {
@@ -427,6 +437,7 @@
         greenCount: GREEN_COUNT,
         purpleCount: PURPLE_COUNT,
         orangeCount: ORANGE_COUNT,
+        cyanCount: CYAN_COUNT,
         newBlueSafeMs: NEW_BLUE_SAFE_MS,
       },
       hard: {
@@ -436,6 +447,7 @@
         greenCount: 8,
         purpleCount: 3,
         orangeCount: 2,
+        cyanCount: 2,
         newBlueSafeMs: 2200,
       }
     };
@@ -466,6 +478,7 @@
     let greens = [];
     let purples = [];
     let oranges = [];
+    let cyans = [];
     let freezeUntil = 0;
     let slowUntil = 0;
     let initialYellowCount = 0;
@@ -473,6 +486,7 @@
     let maxCombo = 0;
     let comboExpiresAt = 0;
     let lastYellowPickupAt = 0;
+    let magnetUntil = 0;
 
     const I18N = {
       'zh-Hant': {
@@ -490,6 +504,8 @@
         LEGEND_PURPLE_TEXT: '碰到後讓所有藍點凍結 3.5 秒，方便脫困或轉向',
         LEGEND_ORANGE_LABEL: '● 橘點：',
         LEGEND_ORANGE_TEXT: '碰到後讓所有藍點暫時減速 4 秒，適合整理局面',
+        LEGEND_CYAN_LABEL: '● 青點：',
+        LEGEND_CYAN_TEXT: '碰到後啟動磁吸 4.5 秒，附近黃點會自動被吸向紅點',
         HUD_TIME: '目前時間',
         HUD_BEST: '最佳成績',
         HUD_YELLOW: '剩餘黃點',
@@ -503,6 +519,9 @@
         HUD_SLOW: '緩速場',
         HUD_SLOW_READY: '就緒',
         HUD_SLOW_ACTIVE: '緩速中',
+        HUD_MAGNET: '磁吸場',
+        HUD_MAGNET_READY: '就緒',
+        HUD_MAGNET_ACTIVE: '吸附中',
         DIFFICULTY_LABEL: '難度',
         DIFFICULTY_EASY: '簡單',
         DIFFICULTY_NORMAL: '普通',
@@ -540,6 +559,7 @@
         DANGER_HIGH: '危險',
         FREEZE_REMAINING: '凍結 {SECONDS} 秒',
         SLOW_REMAINING: '緩速 {SECONDS} 秒',
+        MAGNET_REMAINING: '磁吸 {SECONDS} 秒',
         THREAT_LEFT: '左方',
         THREAT_RIGHT: '右方',
         THREAT_UP: '上方',
@@ -567,6 +587,8 @@
         LEGEND_PURPLE_TEXT: 'Freeze every blue hazard for 3.5 seconds to escape tight spots',
         LEGEND_ORANGE_LABEL: '● Orange Dot: ',
         LEGEND_ORANGE_TEXT: 'Slow every blue hazard for 4 seconds to steady the arena',
+        LEGEND_CYAN_LABEL: '● Cyan Dot: ',
+        LEGEND_CYAN_TEXT: 'Trigger a 4.5 second magnet that pulls nearby yellow dots toward you',
         HUD_TIME: 'Current Time',
         HUD_BEST: 'Best Time',
         HUD_YELLOW: 'Yellow Left',
@@ -580,6 +602,9 @@
         HUD_SLOW: 'Slow Field',
         HUD_SLOW_READY: 'Ready',
         HUD_SLOW_ACTIVE: 'Active',
+        HUD_MAGNET: 'Magnet',
+        HUD_MAGNET_READY: 'Ready',
+        HUD_MAGNET_ACTIVE: 'Active',
         DIFFICULTY_LABEL: 'Difficulty',
         DIFFICULTY_EASY: 'Easy',
         DIFFICULTY_NORMAL: 'Normal',
@@ -617,6 +642,7 @@
         DANGER_HIGH: 'Danger',
         FREEZE_REMAINING: 'Freeze {SECONDS}s',
         SLOW_REMAINING: 'Slow {SECONDS}s',
+        MAGNET_REMAINING: 'Magnet {SECONDS}s',
         THREAT_LEFT: 'left',
         THREAT_RIGHT: 'right',
         THREAT_UP: 'up',
@@ -932,6 +958,11 @@
         ? `${t('HUD_SLOW_ACTIVE')} ${(slowRemaining / 1000).toFixed(1)}s`
         : t('HUD_SLOW_READY');
       hudSlowValueEl.style.color = slowRemaining > 0 ? '#c65f00' : '#666';
+      const magnetRemaining = Math.max(0, magnetUntil - now);
+      hudMagnetValueEl.textContent = magnetRemaining > 0
+        ? `${t('HUD_MAGNET_ACTIVE')} ${(magnetRemaining / 1000).toFixed(1)}s`
+        : t('HUD_MAGNET_READY');
+      hudMagnetValueEl.style.color = magnetRemaining > 0 ? '#00879a' : '#666';
     }
 
     function updateButtons() {
@@ -970,6 +1001,8 @@
       document.getElementById('legendPurpleText').textContent = t('LEGEND_PURPLE_TEXT');
       document.getElementById('legendOrangeLabel').textContent = t('LEGEND_ORANGE_LABEL');
       document.getElementById('legendOrangeText').textContent = t('LEGEND_ORANGE_TEXT');
+      document.getElementById('legendCyanLabel').textContent = t('LEGEND_CYAN_LABEL');
+      document.getElementById('legendCyanText').textContent = t('LEGEND_CYAN_TEXT');
       document.getElementById('hudTimeLabel').textContent = t('HUD_TIME');
       document.getElementById('hudBestLabel').textContent = t('HUD_BEST');
       document.getElementById('hudYellowLabel').textContent = t('HUD_YELLOW');
@@ -979,6 +1012,7 @@
       document.getElementById('hudDashLabel').textContent = t('HUD_DASH');
       document.getElementById('hudDangerLabel').textContent = t('HUD_DANGER');
       document.getElementById('hudSlowLabel').textContent = t('HUD_SLOW');
+      document.getElementById('hudMagnetLabel').textContent = t('HUD_MAGNET');
       langEnBtn.textContent = t('LANG_EN');
       langZhBtn.textContent = t('LANG_ZH');
       langEnBtn.classList.toggle('active', currentLang === 'en');
@@ -1130,9 +1164,11 @@
       greens = createDots(config.greenCount, GREEN_RADIUS, yellows);
       purples = createDots(config.purpleCount, PURPLE_RADIUS, [...yellows, ...greens]);
       oranges = createDots(config.orangeCount, ORANGE_RADIUS, [...yellows, ...greens, ...purples]);
+      cyans = createDots(config.cyanCount, CYAN_RADIUS, [...yellows, ...greens, ...purples, ...oranges]);
       blues = [];
       freezeUntil = 0;
       slowUntil = 0;
+      magnetUntil = 0;
       keys = {};
       touchKeys = {};
       gameOver = false;
@@ -1368,6 +1404,18 @@
       }
     }
 
+    function updateMagnetCollisions(now) {
+      for (let i = cyans.length - 1; i >= 0; i -= 1) {
+        const cyan = cyans[i];
+        if (distance(red.x, red.y, cyan.x, cyan.y) <= red.radius + cyan.radius) {
+          magnetUntil = Math.max(magnetUntil, now) + CYAN_MAGNET_MS;
+          playSound('powerup');
+          cyans.splice(i, 1);
+          updateHUD(now);
+        }
+      }
+    }
+
     function updateOrangeCollisions(now) {
       for (let i = oranges.length - 1; i >= 0; i -= 1) {
         const orange = oranges[i];
@@ -1377,6 +1425,23 @@
           oranges.splice(i, 1);
           updateHUD(now);
         }
+      }
+    }
+
+    function updateMagnetField(dt, now) {
+      if (now >= magnetUntil) return;
+
+      for (const yellow of yellows) {
+        const dx = red.x - yellow.x;
+        const dy = red.y - yellow.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist === 0 || dist > CYAN_MAGNET_RANGE) continue;
+        const pullStrength = 0.3 + (1 - dist / CYAN_MAGNET_RANGE) * 0.7;
+        const step = Math.min(dist, CYAN_MAGNET_SPEED * pullStrength * dt);
+        yellow.x += (dx / dist) * step;
+        yellow.y += (dy / dist) * step;
+        yellow.x = clamp(yellow.x, yellow.radius, WIDTH - yellow.radius);
+        yellow.y = clamp(yellow.y, yellow.radius, HEIGHT - yellow.radius);
       }
     }
 
@@ -1466,6 +1531,23 @@
         ctx.beginPath();
         ctx.arc(orange.x, orange.y, orange.radius * pulse, 0, Math.PI * 2);
         ctx.fillStyle = '#ff7a00';
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    function drawCyans(now) {
+      const magnetActive = now < magnetUntil;
+      for (const cyan of cyans) {
+        ctx.save();
+        const pulse = 0.74 + Math.sin(now / 150 + cyan.x * 0.014) * 0.14;
+        ctx.beginPath();
+        ctx.arc(cyan.x, cyan.y, cyan.radius + 6, 0, Math.PI * 2);
+        ctx.fillStyle = magnetActive ? 'rgba(0, 188, 212, 0.16)' : 'rgba(0, 188, 212, 0.08)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cyan.x, cyan.y, cyan.radius * pulse, 0, Math.PI * 2);
+        ctx.fillStyle = '#00bcd4';
         ctx.fill();
         ctx.restore();
       }
@@ -1683,6 +1765,28 @@
       ctx.restore();
     }
 
+    function drawMagnetOverlay(now) {
+      if (now >= magnetUntil || !hasStarted || paused || gameOver) return;
+      const remainingMs = magnetUntil - now;
+      const alpha = Math.min(0.08, 0.03 + (remainingMs / CYAN_MAGNET_MS) * 0.05);
+      ctx.save();
+      ctx.fillStyle = `rgba(60, 220, 235, ${alpha.toFixed(3)})`;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      ctx.beginPath();
+      ctx.arc(red.x, red.y, CYAN_MAGNET_RANGE, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(0, 145, 170, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 8]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#006b78';
+      ctx.font = 'bold 18px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(tf('MAGNET_REMAINING', { SECONDS: (remainingMs / 1000).toFixed(1) }), WIDTH / 2, 62);
+      ctx.restore();
+    }
+
     function drawSlowOverlay(now) {
       if (now >= slowUntil || !hasStarted || paused || gameOver) return;
       const remainingMs = slowUntil - now;
@@ -1798,12 +1902,14 @@
       drawYellows();
       drawGreens();
       drawOranges(now);
+      drawCyans(now);
       drawPurples(now);
       drawBlues(now);
       drawNearestYellowGuide(now);
       drawMoveTarget();
       drawFreezeOverlay(now);
       drawSlowOverlay(now);
+      drawMagnetOverlay(now);
       drawDangerAura(now);
       drawNearestThreatIndicator(now);
       drawRed(now);
@@ -1840,6 +1946,8 @@
         updateGreenCollisions(timestamp);
         updatePurpleCollisions(timestamp);
         updateOrangeCollisions(timestamp);
+        updateMagnetCollisions(timestamp);
+        updateMagnetField(dt, timestamp);
         updateBlues(dt, timestamp);
       }
       draw(timestamp);
@@ -1901,8 +2009,10 @@
         greens: greens.map((item) => ({ ...item })),
         purples: purples.map((item) => ({ ...item })),
         oranges: oranges.map((item) => ({ ...item })),
+        cyans: cyans.map((item) => ({ ...item })),
         freezeUntil,
         slowUntil,
+        magnetUntil,
         initialYellowCount,
         comboCount,
         maxCombo,
@@ -1970,6 +2080,13 @@
         slowUntil = 0;
         updateOrangeCollisions(2000);
         console.assert(slowUntil === 2000 + ORANGE_SLOW_MS, 'orange pickup should start a slow timer');
+        cyans = [{ x: red.x, y: red.y, radius: CYAN_RADIUS }];
+        magnetUntil = 0;
+        updateMagnetCollisions(2100);
+        console.assert(magnetUntil === 2100 + CYAN_MAGNET_MS, 'cyan pickup should start a magnet timer');
+        yellows = [{ x: red.x + 100, y: red.y, radius: YELLOW_RADIUS }];
+        updateMagnetField(1, 2101);
+        console.assert(yellows[0].x < red.x + 100, 'magnet field should pull nearby yellow dots inward');
         blues = [{ x: 120, y: 100, radius: BLUE_RADIUS, vx: 100, vy: 0, safeUntil: 0 }];
         updateBlues(1, 2001);
         console.assert(Math.abs(blues[0].x - (120 + 100 * ORANGE_SLOW_FACTOR)) < 1e-9, 'slow field should reduce blue movement speed');
@@ -2024,8 +2141,10 @@
         greens = originalState.greens.map((item) => ({ ...item }));
         purples = originalState.purples.map((item) => ({ ...item }));
         oranges = originalState.oranges.map((item) => ({ ...item }));
+        cyans = originalState.cyans.map((item) => ({ ...item }));
         freezeUntil = originalState.freezeUntil;
         slowUntil = originalState.slowUntil;
+        magnetUntil = originalState.magnetUntil;
         initialYellowCount = originalState.initialYellowCount;
         comboCount = originalState.comboCount;
         maxCombo = originalState.maxCombo;
